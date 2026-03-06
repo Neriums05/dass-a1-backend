@@ -1,31 +1,28 @@
 // Event routes: browse, view, create, update, attendance tracking
+//
+// CRITICAL ORDERING RULE: Express matches routes top-to-bottom.
+// All specific/static paths MUST come before /:id wildcards.
+// Order: /trending -> /mine/all -> /by-organizer/:id -> /:id/attend -> /:id/attendance -> /:id
 
 const router = require('express').Router();
 const Event = require('../models/Event');
 const { auth, requireRole } = require('../middleware/auth');
 
 // -------------------------------------------------------
-// GET /api/events
-// Browse all published events with optional search/filters
+// GET /api/events — browse all visible events with filters
 // -------------------------------------------------------
 router.get('/', async (req, res) => {
   try {
     const { search, type, dateFrom, dateTo } = req.query;
-
-    // Start with only visible events
     let query = { status: { $in: ['published', 'ongoing', 'completed'] } };
 
-    // Search by name or tags (case-insensitive)
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
         { tags: { $regex: search, $options: 'i' } }
       ];
     }
-
     if (type) query.eventType = type;
-
-    // Date range filter
     if (dateFrom || dateTo) {
       query.startDate = {};
       if (dateFrom) query.startDate.$gte = new Date(dateFrom);
@@ -33,9 +30,8 @@ router.get('/', async (req, res) => {
     }
 
     const events = await Event.find(query)
-      .populate('organizer', 'organizerName category') // include organizer name
+      .populate('organizer', 'organizerName category')
       .sort({ createdAt: -1 });
-
     res.json(events);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -43,46 +39,110 @@ router.get('/', async (req, res) => {
 });
 
 // -------------------------------------------------------
-// GET /api/events/trending
-// Top 5 events by views in the last 24 hours
+// GET /api/events/trending — top 5 by views in last 24h
+// MUST be before /:id
 // -------------------------------------------------------
 router.get('/trending', async (req, res) => {
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const events = await Event.find({
-    status: 'published',
-    viewsDate: { $gte: yesterday }
-  })
-    .sort({ viewsToday: -1 })
-    .limit(5)
-    .populate('organizer', 'organizerName');
-
-  res.json(events);
+  try {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const events = await Event.find({
+      status: { $in: ['published', 'ongoing'] },
+      viewsDate: { $gte: yesterday }
+    })
+      .sort({ viewsToday: -1 })
+      .limit(5)
+      .populate('organizer', 'organizerName');
+    res.json(events);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // -------------------------------------------------------
-// GET /api/events/mine/all
-// Organizer: get all their own events (all statuses)
+// GET /api/events/mine/all — organizer: all their events
+// MUST be before /:id
 // -------------------------------------------------------
 router.get('/mine/all', ...requireRole('organizer'), async (req, res) => {
-  const events = await Event.find({ organizer: req.user.id }).sort({ createdAt: -1 });
-  res.json(events);
+  try {
+    const events = await Event.find({ organizer: req.user.id }).sort({ createdAt: -1 });
+    res.json(events);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // -------------------------------------------------------
-// GET /api/events/by-organizer/:organizerId
-// Public: get all published events by a specific organizer
+// GET /api/events/by-organizer/:organizerId — public events by one organizer
+// MUST be before /:id
 // -------------------------------------------------------
 router.get('/by-organizer/:organizerId', async (req, res) => {
-  const events = await Event.find({
-    organizer: req.params.organizerId,
-    status: { $in: ['published', 'ongoing', 'completed'] }
-  });
-  res.json(events);
+  try {
+    const events = await Event.find({
+      organizer: req.params.organizerId,
+      status: { $in: ['published', 'ongoing', 'completed'] }
+    });
+    res.json(events);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // -------------------------------------------------------
-// GET /api/events/:id
-// Get a single event and increment its view count
+// GET /api/events/:id/attendance — organizer: full attendance list
+// MUST be before /:id (otherwise 'attendance' matches as event ID)
+// -------------------------------------------------------
+router.get('/:id/attendance', ...requireRole('organizer'), async (req, res) => {
+  try {
+    const Registration = require('../models/Registration');
+    const regs = await Registration.find({ event: req.params.id })
+      .populate('participant', 'firstName lastName email contactNumber');
+    res.json(regs);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// -------------------------------------------------------
+// POST /api/events/:id/attend — organizer: mark a ticket attended
+// MUST be before PUT /:id
+// -------------------------------------------------------
+router.post('/:id/attend', ...requireRole('organizer'), async (req, res) => {
+  try {
+    const Registration = require('../models/Registration');
+    const { ticketId } = req.body;
+
+    if (!ticketId || !ticketId.trim()) {
+      return res.status(400).json({ message: 'Ticket ID is required' });
+    }
+
+    const reg = await Registration.findOne({
+      ticketId: ticketId.trim().toUpperCase(),
+      event: req.params.id   // must belong to THIS event
+    }).populate('participant', 'firstName lastName email');
+
+    if (!reg) {
+      return res.status(404).json({ message: 'Ticket not found for this event' });
+    }
+    if (reg.attended) {
+      return res.status(400).json({ message: 'Already scanned', participant: reg.participant });
+    }
+    if (['cancelled', 'payment_rejected', 'pending_payment'].includes(reg.status)) {
+      return res.status(400).json({ message: 'This registration is not active' });
+    }
+
+    reg.attended   = true;
+    reg.attendedAt = new Date();
+    reg.status     = 'attended';
+    await reg.save();
+
+    res.json({ message: 'Attendance marked!', participant: reg.participant });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// -------------------------------------------------------
+// GET /api/events/:id — single event + increment view count
 // -------------------------------------------------------
 router.get('/:id', async (req, res) => {
   try {
@@ -91,9 +151,6 @@ router.get('/:id', async (req, res) => {
 
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    // Update view counts
-    // If today is a new day, reset viewsToday to 1
-    // Otherwise, just add 1 to viewsToday
     const todayStr = new Date().toDateString();
     const isNewDay = !event.viewsDate || event.viewsDate.toDateString() !== todayStr;
 
@@ -111,14 +168,13 @@ router.get('/:id', async (req, res) => {
 });
 
 // -------------------------------------------------------
-// POST /api/events
-// Organizer: create a new event (starts as draft)
+// POST /api/events — organizer: create new event
 // -------------------------------------------------------
 router.post('/', ...requireRole('organizer'), async (req, res) => {
   try {
     const event = await Event.create({
       ...req.body,
-      organizer: req.user.id, // always set to the logged-in organizer
+      organizer: req.user.id,
       status: req.body.status || 'draft'
     });
     res.status(201).json(event);
@@ -128,32 +184,31 @@ router.post('/', ...requireRole('organizer'), async (req, res) => {
 });
 
 // -------------------------------------------------------
-// PUT /api/events/:id
-// Organizer: update event (rules depend on current status)
+// PUT /api/events/:id — organizer: update event
+// Edit rules depend on current status
 // -------------------------------------------------------
 router.put('/:id', ...requireRole('organizer'), async (req, res) => {
   try {
-    // Make sure this organizer owns the event
     const event = await Event.findOne({ _id: req.params.id, organizer: req.user.id });
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
     if (event.status === 'draft') {
-      // Draft: can change anything
-      Object.assign(event, req.body);
+      // Draft: edit anything except protected fields
+      const { organizer, _id, __v, ...updates } = req.body;
+      Object.keys(updates).forEach(key => { event[key] = updates[key]; });
 
     } else if (event.status === 'published') {
-      // Published: only limited fields can be changed
+      // Published: limited edits only
       const { description, registrationDeadline, registrationLimit, status } = req.body;
-      if (description) event.description = description;
-      if (registrationDeadline) event.registrationDeadline = registrationDeadline;
-      // Can only increase the limit, not decrease
-      if (registrationLimit && registrationLimit > event.registrationLimit) {
-        event.registrationLimit = registrationLimit;
+      if (description !== undefined) event.description = description;
+      if (registrationDeadline)      event.registrationDeadline = registrationDeadline;
+      if (registrationLimit && Number(registrationLimit) > (event.registrationLimit || 0)) {
+        event.registrationLimit = Number(registrationLimit);
       }
       if (status === 'ongoing' || status === 'closed') event.status = status;
 
     } else {
-      // Ongoing/Completed: can only change status
+      // Ongoing / Completed / Closed: status change only
       if (req.body.status) event.status = req.body.status;
     }
 
@@ -162,45 +217,6 @@ router.put('/:id', ...requireRole('organizer'), async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-});
-
-// -------------------------------------------------------
-// POST /api/events/:id/attend
-// Organizer: mark a ticket as attended (QR scan feature)
-// -------------------------------------------------------
-router.post('/:id/attend', ...requireRole('organizer'), async (req, res) => {
-  try {
-    const Registration = require('../models/Registration');
-    const { ticketId } = req.body;
-
-    const reg = await Registration.findOne({ ticketId })
-      .populate('participant', 'firstName lastName email');
-
-    if (!reg) return res.status(404).json({ message: 'Ticket not found' });
-    if (reg.attended) {
-      return res.status(400).json({ message: 'This ticket was already scanned', participant: reg.participant });
-    }
-
-    reg.attended = true;
-    reg.attendedAt = new Date();
-    reg.status = 'attended';
-    await reg.save();
-
-    res.json({ message: 'Attendance marked!', participant: reg.participant });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// -------------------------------------------------------
-// GET /api/events/:id/attendance
-// Organizer: get full attendance list for an event
-// -------------------------------------------------------
-router.get('/:id/attendance', ...requireRole('organizer'), async (req, res) => {
-  const Registration = require('../models/Registration');
-  const regs = await Registration.find({ event: req.params.id })
-    .populate('participant', 'firstName lastName email');
-  res.json(regs);
 });
 
 module.exports = router;

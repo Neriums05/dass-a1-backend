@@ -12,7 +12,6 @@ const { auth, requireRole } = require('../middleware/auth');
 // -------------------------------------------------------
 router.post('/:eventId', auth, async (req, res) => {
   try {
-    // Check they attended the event (status must be 'attended')
     const attendance = await Registration.findOne({
       event: req.params.eventId,
       participant: req.user.id,
@@ -23,10 +22,16 @@ router.post('/:eventId', auth, async (req, res) => {
       return res.status(403).json({ message: 'You can only leave feedback for events you attended' });
     }
 
-    const { rating, comment } = req.body;
+    // Validate rating
+    const rating = Number(req.body.rating);
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({ message: 'Rating must be between 1 and 5' });
+    }
+
+    const { comment } = req.body;
 
     // Note: we do NOT store req.user.id here - that's what makes it anonymous
-    const feedback = await Feedback.create({
+    await Feedback.create({
       event: req.params.eventId,
       rating,
       comment
@@ -38,24 +43,22 @@ router.post('/:eventId', auth, async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/feedback/:eventId
-// Organizer: view all feedback for their event
-// Returns individual comments + average rating
-// -------------------------------------------------------
 router.get('/:eventId', ...requireRole('organizer'), async (req, res) => {
-  const feedbackList = await Feedback.find({ event: req.params.eventId }).sort({ createdAt: -1 });
+  try {
+    const feedbackList = await Feedback.find({ event: req.params.eventId }).sort({ createdAt: -1 });
 
-  // Calculate average rating
-  const average = feedbackList.length
-    ? feedbackList.reduce((sum, f) => sum + f.rating, 0) / feedbackList.length
-    : 0;
+    const average = feedbackList.length
+      ? feedbackList.reduce((sum, f) => sum + f.rating, 0) / feedbackList.length
+      : 0;
 
-  res.json({
-    feedbackList,
-    averageRating: average.toFixed(1),
-    total: feedbackList.length
-  });
+    res.json({
+      feedbackList,
+      averageRating: average.toFixed(1),
+      total: feedbackList.length
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 module.exports = router;

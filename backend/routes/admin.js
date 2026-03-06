@@ -45,8 +45,12 @@ router.post('/organizer', ...requireRole('admin'), async (req, res) => {
 // Admin: list all organizer accounts
 // -------------------------------------------------------
 router.get('/organizers', ...requireRole('admin'), async (req, res) => {
-  const organizers = await User.find({ role: 'organizer' }).select('-password');
-  res.json(organizers);
+  try {
+    const organizers = await User.find({ role: 'organizer' }).select('-password');
+    res.json(organizers);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // -------------------------------------------------------
@@ -54,8 +58,12 @@ router.get('/organizers', ...requireRole('admin'), async (req, res) => {
 // Admin: remove an organizer account
 // -------------------------------------------------------
 router.delete('/organizer/:id', ...requireRole('admin'), async (req, res) => {
-  await User.findByIdAndDelete(req.params.id);
-  res.json({ message: 'Organizer removed' });
+  try {
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Organizer removed' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // -------------------------------------------------------
@@ -63,11 +71,15 @@ router.delete('/organizer/:id', ...requireRole('admin'), async (req, res) => {
 // Admin: get all pending password reset requests from organizers
 // -------------------------------------------------------
 router.get('/reset-requests', ...requireRole('admin'), async (req, res) => {
-  const requests = await User.find({
-    role: 'organizer',
-    'passwordResetRequest.status': 'pending'
-  }).select('organizerName email passwordResetRequest');
-  res.json(requests);
+  try {
+    const requests = await User.find({
+      role: 'organizer',
+      'passwordResetRequest.status': 'pending'
+    }).select('organizerName email passwordResetRequest');
+    res.json(requests);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // -------------------------------------------------------

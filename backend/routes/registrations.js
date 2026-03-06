@@ -25,6 +25,26 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // -------------------------------------------------------
+// GET /api/registrations/mine
+// Participant: get all their own registrations
+// NOTE: must be before /event/:eventId to avoid route conflict
+// -------------------------------------------------------
+router.get('/mine', auth, async (req, res) => {
+  try {
+    const registrations = await Registration.find({ participant: req.user.id })
+      .populate({
+        path: 'event',
+        select: 'name eventType startDate endDate status',
+        populate: { path: 'organizer', select: 'organizerName' }
+      })
+      .sort({ createdAt: -1 });
+    res.json(registrations);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// -------------------------------------------------------
 // POST /api/registrations/register/:eventId
 // Participant registers for a normal event
 // -------------------------------------------------------
@@ -50,10 +70,11 @@ router.post('/register/:eventId', auth, async (req, res) => {
       return res.status(400).json({ message: 'This event is full' });
     }
 
-    // Check if this participant already registered
+    // Check if this participant already registered (and didn't cancel)
     const alreadyRegistered = await Registration.findOne({
       event: event._id,
-      participant: req.user.id
+      participant: req.user.id,
+      status: { $ne: 'cancelled' }
     });
     if (alreadyRegistered) {
       return res.status(400).json({ message: 'You have already registered for this event' });
@@ -217,29 +238,17 @@ router.put('/approve/:regId', ...requireRole('organizer'), async (req, res) => {
 });
 
 // -------------------------------------------------------
-// GET /api/registrations/mine
-// Participant: get all their own registrations
-// -------------------------------------------------------
-router.get('/mine', auth, async (req, res) => {
-  const registrations = await Registration.find({ participant: req.user.id })
-    .populate({
-      path: 'event',
-      select: 'name eventType startDate endDate status',
-      populate: { path: 'organizer', select: 'organizerName' }
-    })
-    .sort({ createdAt: -1 });
-
-  res.json(registrations);
-});
-
-// -------------------------------------------------------
 // GET /api/registrations/event/:eventId
 // Organizer: get all registrations for one of their events
 // -------------------------------------------------------
 router.get('/event/:eventId', ...requireRole('organizer'), async (req, res) => {
-  const registrations = await Registration.find({ event: req.params.eventId })
-    .populate('participant', 'firstName lastName email contactNumber');
-  res.json(registrations);
+  try {
+    const registrations = await Registration.find({ event: req.params.eventId })
+      .populate('participant', 'firstName lastName email contactNumber');
+    res.json(registrations);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 module.exports = router;

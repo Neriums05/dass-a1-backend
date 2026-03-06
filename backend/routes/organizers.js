@@ -5,29 +5,9 @@ const User = require('../models/User');
 const { requireRole } = require('../middleware/auth');
 
 // -------------------------------------------------------
-// GET /api/organizers
-// Public: list all organizers (for participants to browse/follow)
-// -------------------------------------------------------
-router.get('/', async (req, res) => {
-  const organizers = await User.find({ role: 'organizer' })
-    .select('organizerName category description contactEmail');
-  res.json(organizers);
-});
-
-// -------------------------------------------------------
-// GET /api/organizers/:id
-// Public: get a single organizer's public info
-// -------------------------------------------------------
-router.get('/:id', async (req, res) => {
-  const organizer = await User.findById(req.params.id)
-    .select('organizerName category description contactEmail');
-  if (!organizer) return res.status(404).json({ message: 'Organizer not found' });
-  res.json(organizer);
-});
-
-// -------------------------------------------------------
 // PUT /api/organizers/profile
 // Organizer: update their own profile
+// NOTE: must be before /:id to avoid 'profile' being treated as an ID
 // -------------------------------------------------------
 router.put('/profile', ...requireRole('organizer'), async (req, res) => {
   try {
@@ -46,6 +26,7 @@ router.put('/profile', ...requireRole('organizer'), async (req, res) => {
 // -------------------------------------------------------
 // POST /api/organizers/request-reset
 // Organizer: ask admin to reset their password
+// NOTE: must be before /:id
 // -------------------------------------------------------
 router.post('/request-reset', ...requireRole('organizer'), async (req, res) => {
   try {
@@ -57,6 +38,31 @@ router.post('/request-reset', ...requireRole('organizer'), async (req, res) => {
     };
     await user.save();
     res.json({ message: 'Reset request sent to admin' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// -------------------------------------------------------
+// GET /api/organizers
+// Public: list all organizers (for participants to browse/follow)
+// -------------------------------------------------------
+router.get('/', async (req, res) => {
+  try {
+    const organizers = await User.find({ role: 'organizer' })
+      .select('organizerName category description contactEmail');
+    res.json(organizers);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.get('/:id', async (req, res) => {
+  try {
+    const organizer = await User.findById(req.params.id)
+      .select('organizerName category description contactEmail');
+    if (!organizer) return res.status(404).json({ message: 'Organizer not found' });
+    res.json(organizer);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
