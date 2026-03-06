@@ -111,15 +111,24 @@ router.get('/me', auth, async (req, res) => {
 // -------------------------------------------------------
 router.put('/profile', auth, async (req, res) => {
   try {
-    const { firstName, lastName, contactNumber, college, interests, followedOrganizers } = req.body;
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
-    const updatedUser = await User.findByIdAndUpdate(
-      req.user.id,
-      { firstName, lastName, contactNumber, college, interests, followedOrganizers },
-      { new: true } // return the updated document
-    ).select('-password');
+    if (user.role === 'participant') {
+      // Only allow updating participant fields
+      const { firstName, lastName, contactNumber, college, interests, followedOrganizers } = req.body;
+      if (firstName           !== undefined) user.firstName    = firstName;
+      if (lastName            !== undefined) user.lastName     = lastName;
+      if (contactNumber       !== undefined) user.contactNumber = contactNumber;
+      if (college             !== undefined) user.college      = college;
+      if (interests           !== undefined) user.interests    = interests;
+      if (followedOrganizers  !== undefined) user.followedOrganizers = followedOrganizers;
+    }
+    // Organizers update their profile via PUT /organizers/profile instead
 
-    res.json(updatedUser);
+    await user.save();
+    const updated = await User.findById(req.user.id).select('-password').populate('followedOrganizers', 'organizerName category');
+    res.json(updated);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -132,6 +141,10 @@ router.put('/profile', auth, async (req, res) => {
 router.put('/change-password', auth, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters' });
+    }
 
     const user = await User.findById(req.user.id);
 

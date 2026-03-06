@@ -6,32 +6,60 @@
 
 const router = require('express').Router();
 const Event = require('../models/Event');
+const User = require('../models/User');
+const Registration = require('../models/Registration');
 const { auth, requireRole } = require('../middleware/auth');
+
+// Helper: post a new event notification to Discord via webhook
+// Uses the built-in fetch (Node 18+). Silently fails if no webhook configured.
+async function fireDiscordWebhook(webhookUrl, event) {
+  if (!webhookUrl) return;
+  try {
+    const message = '🎉 **New Event Published: ' + event.name + '**\n' +
+      '📅 ' + (event.startDate ? new Date(event.startDate).toDateString() : 'TBD') + '\n' +
+      (event.description ? event.description.slice(0, 200) : '');
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: message })
+    });
+  } catch {
+    // Never crash the app if Discord webhook fails
+  }
+}
 
 // -------------------------------------------------------
 // GET /api/events — browse all visible events with filters
 // -------------------------------------------------------
 router.get('/', async (req, res) => {
   try {
-    const { search, type, dateFrom, dateTo } = req.query;
+    const { search, type, dateFrom, dateTo, eligibility } = req.query;
     let query = { status: { $in: ['published', 'ongoing', 'completed'] } };
 
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { tags: { $regex: search, $options: 'i' } }
-      ];
-    }
-    if (type) query.eventType = type;
+    if (type)        query.eventType  = type;
+    if (eligibility) query.eligibility = { $regex: eligibility, $options: 'i' };
+
     if (dateFrom || dateTo) {
       query.startDate = {};
       if (dateFrom) query.startDate.$gte = new Date(dateFrom);
       if (dateTo)   query.startDate.$lte = new Date(dateTo);
     }
 
-    const events = await Event.find(query)
+    // Fetch all matching events first, then filter by search (including organizer name)
+    let events = await Event.find(query)
       .populate('organizer', 'organizerName category')
       .sort({ createdAt: -1 });
+
+    // If search term given, filter client-side so we can match organizer name too
+    if (search) {
+      const re = new RegExp(search, 'i');
+      events = events.filter(e =>
+        re.test(e.name) ||
+        e.tags?.some(t => re.test(t)) ||
+        re.test(e.organizer?.organizerName || '')
+      );
+    }
+
     res.json(events);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -93,7 +121,10 @@ router.get('/by-organizer/:organizerId', async (req, res) => {
 // -------------------------------------------------------
 router.get('/:id/attendance', ...requireRole('organizer'), async (req, res) => {
   try {
-    const Registration = require('../models/Registration');
+    // Verify this organizer owns the event before returning attendance data
+    const event = await Event.findOne({ _id: req.params.id, organizer: req.user.id });
+    if (!event) return res.status(403).json({ message: 'Access denied: not your event' });
+
     const regs = await Registration.find({ event: req.params.id })
       .populate('participant', 'firstName lastName email contactNumber');
     res.json(regs);
@@ -108,7 +139,10 @@ router.get('/:id/attendance', ...requireRole('organizer'), async (req, res) => {
 // -------------------------------------------------------
 router.post('/:id/attend', ...requireRole('organizer'), async (req, res) => {
   try {
-    const Registration = require('../models/Registration');
+    // Verify this organizer owns the event
+    const event = await Event.findOne({ _id: req.params.id, organizer: req.user.id });
+    if (!event) return res.status(403).json({ message: 'Access denied: not your event' });
+
     const { ticketId } = req.body;
 
     if (!ticketId || !ticketId.trim()) {
@@ -154,12 +188,19 @@ router.get('/:id', async (req, res) => {
     const todayStr = new Date().toDateString();
     const isNewDay = !event.viewsDate || event.viewsDate.toDateString() !== todayStr;
 
-    await Event.findByIdAndUpdate(req.params.id, {
-      $inc: { viewCount: 1 },
-      ...(isNewDay
-        ? { $set: { viewsToday: 1, viewsDate: new Date() } }
-        : { $inc: { viewsToday: 1 } })
-    });
+    // Increment view count. If it's a new day, also reset the daily counter.
+    // Two separate update ops are needed: $inc viewCount always, plus either
+    // $set viewsToday=1 (new day) or $inc viewsToday (same day).
+    if (isNewDay) {
+      await Event.findByIdAndUpdate(req.params.id, {
+        $inc: { viewCount: 1 },
+        $set: { viewsToday: 1, viewsDate: new Date() }
+      });
+    } else {
+      await Event.findByIdAndUpdate(req.params.id, {
+        $inc: { viewCount: 1, viewsToday: 1 }
+      });
+    }
 
     res.json(event);
   } catch (err) {
@@ -177,6 +218,13 @@ router.post('/', ...requireRole('organizer'), async (req, res) => {
       organizer: req.user.id,
       status: req.body.status || 'draft'
     });
+
+    // If published immediately, fire Discord webhook
+    if (event.status === 'published') {
+      const organizer = await User.findById(req.user.id);
+      fireDiscordWebhook(organizer?.discordWebhook, event);
+    }
+
     res.status(201).json(event);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -192,27 +240,48 @@ router.put('/:id', ...requireRole('organizer'), async (req, res) => {
     const event = await Event.findOne({ _id: req.params.id, organizer: req.user.id });
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
+    // Remember the old status so we know if it just became published
+    const oldStatus = event.status;
+
     if (event.status === 'draft') {
-      // Draft: edit anything except protected fields
-      const { organizer, _id, __v, ...updates } = req.body;
-      Object.keys(updates).forEach(key => { event[key] = updates[key]; });
-
+      // Draft events can be fully edited - update any field that was sent
+      if (req.body.name !== undefined)                 event.name = req.body.name;
+      if (req.body.description !== undefined)          event.description = req.body.description;
+      if (req.body.eventType !== undefined)            event.eventType = req.body.eventType;
+      if (req.body.eligibility !== undefined)          event.eligibility = req.body.eligibility;
+      if (req.body.startDate !== undefined)            event.startDate = req.body.startDate;
+      if (req.body.endDate !== undefined)              event.endDate = req.body.endDate;
+      if (req.body.registrationDeadline !== undefined) event.registrationDeadline = req.body.registrationDeadline;
+      if (req.body.registrationLimit !== undefined)    event.registrationLimit = req.body.registrationLimit;
+      if (req.body.registrationFee !== undefined)      event.registrationFee = req.body.registrationFee;
+      if (req.body.tags !== undefined)                 event.tags = req.body.tags;
+      if (req.body.customForm !== undefined)           event.customForm = req.body.customForm;
+      if (req.body.variants !== undefined)             event.variants = req.body.variants;
+      if (req.body.purchaseLimitPerParticipant !== undefined) event.purchaseLimitPerParticipant = req.body.purchaseLimitPerParticipant;
+      if (req.body.status !== undefined)               event.status = req.body.status;
     } else if (event.status === 'published') {
-      // Published: limited edits only
-      const { description, registrationDeadline, registrationLimit, status } = req.body;
-      if (description !== undefined) event.description = description;
-      if (registrationDeadline)      event.registrationDeadline = registrationDeadline;
-      if (registrationLimit && Number(registrationLimit) > (event.registrationLimit || 0)) {
-        event.registrationLimit = Number(registrationLimit);
+      // Published events: only limited fields can change
+      if (req.body.description !== undefined)          event.description = req.body.description;
+      if (req.body.registrationDeadline)               event.registrationDeadline = req.body.registrationDeadline;
+      if (req.body.registrationLimit && Number(req.body.registrationLimit) > (event.registrationLimit || 0)) {
+        event.registrationLimit = Number(req.body.registrationLimit);
       }
-      if (status === 'ongoing' || status === 'closed') event.status = status;
-
+      if (req.body.status === 'ongoing' || req.body.status === 'closed') {
+        event.status = req.body.status;
+      }
     } else {
-      // Ongoing / Completed / Closed: status change only
+      // ongoing / completed / closed: only status changes allowed
       if (req.body.status) event.status = req.body.status;
     }
 
     await event.save();
+
+    // Fire Discord webhook if event just became published
+    if (oldStatus !== 'published' && event.status === 'published') {
+      const organizer = await User.findById(req.user.id);
+      fireDiscordWebhook(organizer?.discordWebhook, event);
+    }
+
     res.json(event);
   } catch (err) {
     res.status(500).json({ message: err.message });

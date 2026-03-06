@@ -2,6 +2,8 @@
 
 const router = require('express').Router();
 const User = require('../models/User');
+const Event = require('../models/Event');
+const Registration = require('../models/Registration');
 const bcrypt = require('bcryptjs');
 const { requireRole } = require('../middleware/auth');
 
@@ -14,28 +16,32 @@ router.post('/organizer', ...requireRole('admin'), async (req, res) => {
   try {
     const { organizerName, category, description, contactEmail } = req.body;
 
-    // Generate a login email based on the organizer name
-    const loginEmail = organizerName.toLowerCase().replace(/\s+/g, '') + '@felicity.org';
+    if (!organizerName || !organizerName.trim()) {
+      return res.status(400).json({ message: 'Organizer name is required' });
+    }
 
-    // Generate a random password like "Pass@abc123"
-    const rawPassword = 'Pass@' + Math.random().toString(36).slice(2, 8);
+    // Generate a login email based on the organizer name
+    const loginEmail = organizerName.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '') + '@felicity.org';
+
+    // Check for duplicate email
+    const existing = await User.findOne({ email: loginEmail });
+    if (existing) {
+      return res.status(400).json({ message: 'An organizer with this name already exists (email conflict: ' + loginEmail + ')' });
+    }
+
+    const rawPassword    = 'Pass@' + Math.random().toString(36).slice(2, 8);
     const hashedPassword = await bcrypt.hash(rawPassword, 10);
 
     const user = await User.create({
-      email: loginEmail,
-      password: hashedPassword,
-      role: 'organizer',
+      email: loginEmail, password: hashedPassword, role: 'organizer',
       organizerName, category, description, contactEmail
     });
 
-    // Return the plain-text password so admin can share it with the organizer
-    res.status(201).json({
-      message: 'Organizer created',
-      loginEmail,
-      password: rawPassword, // admin shares this with the organizer
-      id: user._id
-    });
+    res.status(201).json({ message: 'Organizer created', loginEmail, password: rawPassword, id: user._id });
   } catch (err) {
+    if (err.code === 11000) {
+      return res.status(400).json({ message: 'An organizer with that login email already exists' });
+    }
     res.status(500).json({ message: err.message });
   }
 });
@@ -59,8 +65,22 @@ router.get('/organizers', ...requireRole('admin'), async (req, res) => {
 // -------------------------------------------------------
 router.delete('/organizer/:id', ...requireRole('admin'), async (req, res) => {
   try {
+    const organizer = await User.findById(req.params.id);
+    if (!organizer || organizer.role !== 'organizer') {
+      return res.status(404).json({ message: 'Organizer not found' });
+    }
+
+    // Clean up all events and their registrations before deleting the organizer
+    const events = await Event.find({ organizer: req.params.id });
+    const eventIds = events.map(e => e._id);
+
+    if (eventIds.length > 0) {
+      await Registration.deleteMany({ event: { $in: eventIds } });
+      await Event.deleteMany({ organizer: req.params.id });
+    }
+
     await User.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Organizer removed' });
+    res.json({ message: 'Organizer and all their events removed' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -94,18 +114,33 @@ router.put('/reset-requests/:id', ...requireRole('admin'), async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     if (action === 'approve') {
-      // Generate and set a new password
       const newPassword = 'New@' + Math.random().toString(36).slice(2, 8);
       user.password = await bcrypt.hash(newPassword, 10);
-      user.passwordResetRequest.status = 'approved';
+
+      // Push to history before updating status
+      user.passwordResetHistory.push({
+        status:      'approved',
+        reason:      user.passwordResetRequest.reason,
+        requestedAt: user.passwordResetRequest.requestedAt,
+        resolvedAt:  new Date(),
+        adminComment
+      });
+      user.passwordResetRequest.status      = 'approved';
       user.passwordResetRequest.adminComment = adminComment;
       await user.save();
 
-      // Admin must manually share this with the organizer
       return res.json({ message: 'Approved', newPassword });
 
     } else {
-      user.passwordResetRequest.status = 'rejected';
+      // Push rejected entry to history too
+      user.passwordResetHistory.push({
+        status:      'rejected',
+        reason:      user.passwordResetRequest.reason,
+        requestedAt: user.passwordResetRequest.requestedAt,
+        resolvedAt:  new Date(),
+        adminComment
+      });
+      user.passwordResetRequest.status      = 'rejected';
       user.passwordResetRequest.adminComment = adminComment;
       await user.save();
       return res.json({ message: 'Rejected' });

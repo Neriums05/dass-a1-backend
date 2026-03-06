@@ -29,7 +29,7 @@ const upload = multer({ storage });
 // Participant: get all their own registrations
 // NOTE: must be before /event/:eventId to avoid route conflict
 // -------------------------------------------------------
-router.get('/mine', auth, async (req, res) => {
+router.get('/mine', ...requireRole('participant'), async (req, res) => {
   try {
     const registrations = await Registration.find({ participant: req.user.id })
       .populate({
@@ -48,10 +48,15 @@ router.get('/mine', auth, async (req, res) => {
 // POST /api/registrations/register/:eventId
 // Participant registers for a normal event
 // -------------------------------------------------------
-router.post('/register/:eventId', auth, async (req, res) => {
+router.post('/register/:eventId', ...requireRole('participant'), async (req, res) => {
   try {
     const event = await Event.findById(req.params.eventId);
     if (!event) return res.status(404).json({ message: 'Event not found' });
+
+    // Participants should use /merch/:eventId for merchandise events
+    if (event.eventType === 'merchandise') {
+      return res.status(400).json({ message: 'Use the merchandise endpoint to purchase this item' });
+    }
 
     // Validation checks
     if (!['published', 'ongoing'].includes(event.status)) {
@@ -122,14 +127,34 @@ router.post('/register/:eventId', auth, async (req, res) => {
 // POST /api/registrations/merch/:eventId
 // Participant places a merchandise order (status = pending_payment)
 // -------------------------------------------------------
-router.post('/merch/:eventId', auth, async (req, res) => {
+router.post('/merch/:eventId', ...requireRole('participant'), async (req, res) => {
   try {
     const event = await Event.findById(req.params.eventId);
     if (!event || event.eventType !== 'merchandise') {
       return res.status(400).json({ message: 'Not a merchandise event' });
     }
 
+    if (!['published', 'ongoing'].includes(event.status)) {
+      return res.status(400).json({ message: 'This event is not open for orders' });
+    }
+
+    if (event.registrationDeadline && new Date() > event.registrationDeadline) {
+      return res.status(400).json({ message: 'Order deadline has passed' });
+    }
+
+    if (!event.variants || event.variants.length === 0) {
+      return res.status(400).json({ message: 'This event has no product variants configured' });
+    }
+
     const { variant, quantity } = req.body;
+
+    if (!variant || !variant.size || !variant.color) {
+      return res.status(400).json({ message: 'Please select a valid size and colour' });
+    }
+
+    if (!quantity || quantity < 1) {
+      return res.status(400).json({ message: 'Quantity must be at least 1' });
+    }
 
     // Check stock for the chosen variant
     const variantData = event.variants.find(
@@ -174,12 +199,24 @@ router.post('/merch/:eventId', auth, async (req, res) => {
 // POST /api/registrations/payment-proof/:regId
 // Participant uploads payment screenshot for a merch order
 // -------------------------------------------------------
-router.post('/payment-proof/:regId', auth, upload.single('proof'), async (req, res) => {
+router.post('/payment-proof/:regId', ...requireRole('participant'), upload.single('proof'), async (req, res) => {
   try {
     const reg = await Registration.findOne({ _id: req.params.regId, participant: req.user.id });
     if (!reg) return res.status(404).json({ message: 'Registration not found' });
 
-    reg.paymentProof = req.file ? req.file.path : null;
+    if (!['pending_payment', 'payment_rejected'].includes(reg.status)) {
+      return res.status(400).json({ message: 'Payment proof can only be uploaded for pending or rejected orders' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    reg.paymentProof = req.file.path;
+    // Reset status to pending_payment if it was rejected (re-submission)
+    if (reg.status === 'payment_rejected') {
+      reg.status = 'pending_payment';
+    }
     await reg.save();
 
     res.json({ message: 'Payment proof uploaded. Awaiting organizer approval.' });
@@ -200,7 +237,16 @@ router.put('/approve/:regId', ...requireRole('organizer'), async (req, res) => {
 
     if (!reg) return res.status(404).json({ message: 'Registration not found' });
 
+    // Ensure this organizer owns the event being approved
+    if (reg.event.organizer.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Access denied: not your event' });
+    }
+
     const { action } = req.body; // 'approve' or 'reject'
+
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ message: 'Invalid action. Must be "approve" or "reject"' });
+    }
 
     if (action === 'approve') {
       // Decrement stock for the purchased variant
@@ -243,6 +289,10 @@ router.put('/approve/:regId', ...requireRole('organizer'), async (req, res) => {
 // -------------------------------------------------------
 router.get('/event/:eventId', ...requireRole('organizer'), async (req, res) => {
   try {
+    // Verify ownership
+    const event = await Event.findOne({ _id: req.params.eventId, organizer: req.user.id });
+    if (!event) return res.status(403).json({ message: 'Access denied: not your event' });
+
     const registrations = await Registration.find({ event: req.params.eventId })
       .populate('participant', 'firstName lastName email contactNumber');
     res.json(registrations);

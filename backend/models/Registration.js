@@ -38,7 +38,10 @@ const registrationSchema = new mongoose.Schema({
 
   // Attendance tracking
   attended:   { type: Boolean, default: false },
-  attendedAt: Date
+  attendedAt: Date,
+
+  // Feedback tracking - prevents duplicate feedback submissions
+  feedbackSubmitted: { type: Boolean, default: false }
 
 }, { timestamps: true });
 

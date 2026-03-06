@@ -31,9 +31,19 @@ router.put('/profile', ...requireRole('organizer'), async (req, res) => {
 router.post('/request-reset', ...requireRole('organizer'), async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
+
+    // Prevent spamming: block if a request is already pending
+    if (user.passwordResetRequest?.status === 'pending') {
+      return res.status(400).json({ message: 'You already have a pending reset request. Please wait for admin review.' });
+    }
+
+    if (!req.body.reason || !req.body.reason.trim()) {
+      return res.status(400).json({ message: 'Please provide a reason for the reset request.' });
+    }
+
     user.passwordResetRequest = {
-      status: 'pending',
-      reason: req.body.reason,
+      status:      'pending',
+      reason:      req.body.reason.trim(),
       requestedAt: new Date()
     };
     await user.save();

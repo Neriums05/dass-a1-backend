@@ -29,12 +29,22 @@ const userSchema = new mongoose.Schema({
   discordWebhook: String, // optional Discord webhook URL
 
   // Password reset request (organizer asks admin to reset their password)
+  // Single latest request — for pending/approved/rejected workflow
   passwordResetRequest: {
     status:      { type: String, enum: ['none', 'pending', 'approved', 'rejected'], default: 'none' },
     reason:      String,
     requestedAt: Date,
     adminComment: String
-  }
+  },
+
+  // Full history of all past reset requests (Issue 10 fix)
+  passwordResetHistory: [{
+    status:      { type: String, enum: ['approved', 'rejected'] },
+    reason:      String,
+    requestedAt: Date,
+    resolvedAt:  Date,
+    adminComment: String
+  }]
 
 }, { timestamps: true }); // adds createdAt and updatedAt automatically
 
