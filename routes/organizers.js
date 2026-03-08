@@ -12,6 +12,11 @@ const { requireRole } = require('../middleware/auth');
 router.put('/profile', ...requireRole('organizer'), async (req, res) => {
   try {
     const { organizerName, category, description, contactEmail, discordWebhook, contactNumber } = req.body;
+    
+    if (contactNumber && contactNumber.length !== 10) {
+      return res.status(400).json({ message: 'Contact Number must be exactly 10 digits' });
+    }
+
     const user = await User.findByIdAndUpdate(
       req.user.id,
       { organizerName, category, description, contactEmail, discordWebhook, contactNumber },

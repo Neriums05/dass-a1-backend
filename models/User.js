@@ -16,7 +16,7 @@ const userSchema = new mongoose.Schema({
   lastName:        String,
   participantType: { type: String, enum: ['iiit', 'non-iiit'] },
   college:         String,
-  contactNumber:   { type: String, required: true },
+  contactNumber:   String,
   interests:       [String], // e.g. ['Music', 'Tech']
   // Array of organizer IDs this participant follows
   followedOrganizers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],

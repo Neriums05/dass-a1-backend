@@ -45,6 +45,10 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'All required fields must be provided' });
     }
 
+    if (contactNumber.length !== 10) {
+      return res.status(400).json({ message: 'Contact Number must be exactly 10 digits' });
+    }
+
     // IIIT students must use their IIIT email
     if (participantType === 'iiit') {
       if (!isIIITEmail(email)) {
@@ -142,6 +146,10 @@ router.put('/profile', auth, async (req, res) => {
       // Ensure contactNumber is provided
       if (req.body.contactNumber !== undefined && (!req.body.contactNumber || !req.body.contactNumber.trim())) {
         return res.status(400).json({ message: 'Contact Number is required' });
+      }
+
+      if (req.body.contactNumber !== undefined && req.body.contactNumber.length !== 10) {
+        return res.status(400).json({ message: 'Contact Number must be exactly 10 digits' });
       }
 
       // Only allow updating participant fields
