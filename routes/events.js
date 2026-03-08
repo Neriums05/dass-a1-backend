@@ -52,7 +52,8 @@ router.get('/', async (req, res) => {
     // Fetch all matching events first, then filter by search (including organizer name)
     let events = await Event.find(query)
       .populate('organizer', 'organizerName category')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     // If search term given, filter client-side so we can match organizer name too
     if (search && search.trim()) {
@@ -90,7 +91,8 @@ router.get('/trending', async (req, res) => {
     })
       .sort({ viewsToday: -1 })
       .limit(5)
-      .populate('organizer', 'organizerName');
+      .populate('organizer', 'organizerName')
+      .lean();
     res.json(events);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -103,7 +105,7 @@ router.get('/trending', async (req, res) => {
 // -------------------------------------------------------
 router.get('/mine/all', ...requireRole('organizer'), async (req, res) => {
   try {
-    const events = await Event.find({ organizer: req.user.id }).sort({ createdAt: -1 });
+    const events = await Event.find({ organizer: req.user.id }).sort({ createdAt: -1 }).lean();
     res.json(events);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -119,7 +121,7 @@ router.get('/by-organizer/:organizerId', async (req, res) => {
     const events = await Event.find({
       organizer: req.params.organizerId,
       status: { $in: ['published', 'ongoing', 'completed'] }
-    });
+    }).lean();
     res.json(events);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -135,7 +137,8 @@ router.get('/:id/export-csv', ...requireRole('organizer'), async (req, res) => {
     if (!event) return res.status(403).json({ message: 'Access denied' });
 
     const regs = await Registration.find({ event: req.params.id })
-      .populate('participant', 'firstName lastName email contactNumber');
+      .populate('participant', 'firstName lastName email contactNumber')
+      .lean();
 
     const headers = ['Name', 'Email', 'Contact', 'Ticket ID', 'Status', 'Attended', 'Attended At'];
     const rows = regs.map(r => [
@@ -170,7 +173,8 @@ router.get('/:id/attendance', ...requireRole('organizer'), async (req, res) => {
     if (!event) return res.status(403).json({ message: 'Access denied: not your event' });
 
     const regs = await Registration.find({ event: req.params.id })
-      .populate('participant', 'firstName lastName email contactNumber');
+      .populate('participant', 'firstName lastName email contactNumber')
+      .lean();
     res.json(regs);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -226,7 +230,8 @@ router.post('/:id/attend', ...requireRole('organizer'), async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const event = await Event.findById(req.params.id)
-      .populate('organizer', 'organizerName category contactEmail description');
+      .populate('organizer', 'organizerName category contactEmail description')
+      .lean();
 
     if (!event) return res.status(404).json({ message: 'Event not found' });
 

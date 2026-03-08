@@ -4,6 +4,7 @@ const router = require('express').Router();
 const User = require('../models/User');
 const Event = require('../models/Event');
 const Registration = require('../models/Registration');
+const { sendEmail } = require('../utils/email');
 const bcrypt = require('bcryptjs');
 const { requireRole } = require('../middleware/auth');
 
@@ -75,7 +76,7 @@ router.post('/organizer', ...requireRole('admin'), async (req, res) => {
 // -------------------------------------------------------
 router.get('/organizers', ...requireRole('admin'), async (req, res) => {
   try {
-    const organizers = await User.find({ role: 'organizer' }).select('-password');
+    const organizers = await User.find({ role: 'organizer' }).select('-password').lean();
     res.json(organizers);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -94,7 +95,7 @@ router.delete('/organizer/:id', ...requireRole('admin'), async (req, res) => {
     }
 
     // Clean up all events and their registrations before deleting the organizer
-    const events = await Event.find({ organizer: req.params.id });
+    const events = await Event.find({ organizer: req.params.id }).lean();
     const eventIds = events.map(e => e._id);
 
     if (eventIds.length > 0) {
@@ -118,7 +119,7 @@ router.get('/reset-requests', ...requireRole('admin'), async (req, res) => {
     const requests = await User.find({
       role: 'organizer',
       'passwordResetRequest.status': 'pending'
-    }).select('organizerName email passwordResetRequest');
+    }).select('organizerName email passwordResetRequest').lean();
     res.json(requests);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -147,6 +148,15 @@ router.put('/reset-requests/:id', ...requireRole('admin'), async (req, res) => {
       user.passwordResetRequest.adminComment = adminComment;
       await user.save();
 
+      const emailHtml = `
+        <h2>Password Reset Approved</h2>
+        <p>Your password has been reset by the admin.</p>
+        <p>Your new temporary password is: <strong>${newPassword}</strong></p>
+        <p>Please log in and change your password immediately.</p>
+        ${adminComment ? `<p>Admin Note: ${adminComment}</p>` : ''}
+      `;
+      await sendEmail(user.email, 'Felicity - Password Reset Approved', emailHtml);
+
       return res.json({ message: 'Approved', newPassword });
 
     } else {
@@ -155,6 +165,14 @@ router.put('/reset-requests/:id', ...requireRole('admin'), async (req, res) => {
       user.passwordResetRequest.status = 'rejected';
       user.passwordResetRequest.adminComment = adminComment;
       await user.save();
+      const emailHtml = `
+        <h2>Password Reset Rejected</h2>
+        <p>Your password reset request has been rejected by the admin.</p>
+        ${adminComment ? `<p>Reason/Note: ${adminComment}</p>` : ''}
+        <p>If you believe this is an error, please contact the admin directly.</p>
+      `;
+      await sendEmail(user.email, 'Felicity - Password Reset Rejected', emailHtml);
+
       return res.json({ message: 'Rejected' });
     }
   } catch (err) {

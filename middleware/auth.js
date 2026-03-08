@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 // Checks if the request has a valid JWT token.
 // If valid, it attaches the user info (id, role, email) to req.user
 // so route handlers can use it.
-function auth(req, res, next) {
+async function auth(req, res, next) {
   // The token comes in the Authorization header as: "Bearer <token>"
   const token = req.headers.authorization?.split(' ')[1];
 
@@ -17,8 +17,17 @@ function auth(req, res, next) {
 
   try {
     // Verify the token using our secret key
-    req.user = jwt.verify(token, process.env.JWT_SECRET);
-    next(); // token is valid, continue to the route handler
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    // Check if user still exists (for session invalidation on deletion)
+    const User = require('../models/User');
+    const user = await User.findById(decoded.id).select('_id').lean();
+    if (!user) {
+      return res.status(401).json({ message: 'Session invalid: User no longer exists' });
+    }
+
+    req.user = decoded;
+    next(); // token is valid and user exists, continue
   } catch {
     res.status(401).json({ message: 'Invalid token' });
   }

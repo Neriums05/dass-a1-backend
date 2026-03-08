@@ -37,7 +37,8 @@ router.get('/mine', ...requireRole('participant'), async (req, res) => {
         select: 'name eventType startDate endDate status',
         populate: { path: 'organizer', select: 'organizerName' }
       })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
     res.json(registrations);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -118,7 +119,7 @@ router.post('/register/:eventId', ...requireRole('participant'), async (req, res
       <p>Show this QR code at the event:</p>
       <img src="${qrCode}" alt="QR Code" style="width:200px" />
     `;
-    sendEmail(req.user.email, 'Your Felicity Ticket - ' + event.name, emailHtml);
+    await sendEmail(req.user.email, 'Your Felicity Ticket - ' + event.name, emailHtml);
 
     res.status(201).json(registration);
   } catch (err) {
@@ -152,10 +153,14 @@ router.post('/merch/:eventId', ...requireRole('participant'), async (req, res) =
       return res.status(400).json({ message: 'This event has no product variants configured' });
     }
 
-    const { variant, quantity } = req.body;
+    const { variant, quantity, productDetails } = req.body;
 
     if (!variant || !variant.size || !variant.color) {
       return res.status(400).json({ message: 'Please select a valid size and colour' });
+    }
+
+    if (!productDetails || !productDetails.trim()) {
+      return res.status(400).json({ message: 'Product details are required' });
     }
 
     const orderQuantity = Number(quantity);
@@ -190,7 +195,8 @@ router.post('/merch/:eventId', ...requireRole('participant'), async (req, res) =
       ticketId,
       status: 'pending_payment', // wait for payment proof upload
       variant,
-      quantity: orderQuantity
+      quantity: orderQuantity,
+      productDetails
     });
 
     res.status(201).json({

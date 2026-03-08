@@ -6,24 +6,38 @@ const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 
 async function seedAdmin() {
-  // Check if any admin already exists
-  const adminExists = await User.findOne({ role: 'admin' });
+  try {
+    const email = process.env.ADMIN_EMAIL;
+    const password = process.env.ADMIN_PASSWORD;
 
-  if (adminExists) {
-    console.log('Admin already exists, skipping seed');
-    return;
+    if (!email || !password) {
+      console.warn('⚠️ ADMIN_EMAIL or ADMIN_PASSWORD not set in environment. Skipping auto-creation.');
+      return;
+    }
+
+    // Check if any admin already exists
+    const adminExists = await User.findOne({ role: 'admin' });
+
+    if (adminExists) {
+      console.log('✅ Admin already exists, skipping seed');
+      return;
+    }
+
+    console.log('🚀 Attempting to create admin account...');
+
+    // Hash the password before storing
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await User.create({
+      email: email,
+      password: hashedPassword,
+      role: 'admin'
+    });
+
+    console.log('✨ Admin account created successfully:', email);
+  } catch (err) {
+    console.error('❌ Error during admin seeding:', err.message);
   }
-
-  // Hash the password before storing
-  const hashedPassword = await bcrypt.hash(process.env.ADMIN_PASSWORD, 10);
-
-  await User.create({
-    email: process.env.ADMIN_EMAIL,
-    password: hashedPassword,
-    role: 'admin'
-  });
-
-  console.log('Admin account created:', process.env.ADMIN_EMAIL);
 }
 
 module.exports = seedAdmin;

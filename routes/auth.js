@@ -39,9 +39,9 @@ function assignIfDefined(target, source, fields) {
 // -------------------------------------------------------
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, firstName, lastName, participantType, college, contactNumber } = req.body;
+    let { email, password, firstName, lastName, participantType, college, contactNumber, securityQuestion, securityAnswer } = req.body;
 
-    if (!email || !password || !firstName || !lastName || !participantType || !contactNumber) {
+    if (!email || !password || !firstName || !lastName || !participantType || !contactNumber || !securityQuestion || !securityAnswer) {
       return res.status(400).json({ message: 'All required fields must be provided' });
     }
 
@@ -49,13 +49,12 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'Contact Number must be exactly 10 digits' });
     }
 
-    // IIIT students must use their IIIT email
+    // IIIT students must use their IIIT email and have college set to IIIT
     if (participantType === 'iiit') {
       if (!isIIITEmail(email)) {
-        return res.status(400).json({
-          message: 'IIIT students must use a valid institutional email (@iiit.ac.in, @students.iiit.ac.in, or @research.iiit.ac.in)'
-        });
+        return res.status(400).json({ message: 'IIIT students must use their institutional email' });
       }
+      college = 'IIIT'; // Set college to 'IIIT' if participantType is 'iiit'
     }
 
     // Check if email is already taken
@@ -66,10 +65,12 @@ router.post('/register', async (req, res) => {
 
     // Hash password (never store plain text)
     const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedAnswer = await bcrypt.hash(securityAnswer.toLowerCase().trim(), 10);
 
     const user = await User.create({
       email, password: hashedPassword, role: 'participant',
-      firstName, lastName, participantType, college, contactNumber
+      firstName, lastName, participantType, college, contactNumber,
+      securityQuestion, securityAnswer: hashedAnswer
     });
 
     // Send back a token so the user is immediately logged in
@@ -156,12 +157,17 @@ router.put('/profile', auth, async (req, res) => {
       assignIfDefined(user, req.body, [
         'firstName',
         'lastName',
-        'contactNumber',
         'college',
         'interests',
+        'contactNumber',
         'followedOrganizers',
         'hasCompletedOnboarding'
       ]);
+
+      // If they switched to IIIT type or are IIIT, ensure college is IIIT
+      if (user.participantType === 'iiit') {
+        user.college = 'IIIT';
+      }
     }
     // Organizers update their profile via PUT /organizers/profile instead
 
@@ -197,6 +203,50 @@ router.put('/change-password', auth, async (req, res) => {
     await user.save();
 
     res.json({ message: 'Password changed successfully' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// -------------------------------------------------------
+// POST /api/auth/forgot-password - Step 1: Get Question
+// -------------------------------------------------------
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required' });
+
+    const user = await User.findOne({ email: email.toLowerCase() }).select('securityQuestion').lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user.securityQuestion) return res.status(400).json({ message: 'No security question set for this account' });
+
+    res.json({ question: user.securityQuestion });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// -------------------------------------------------------
+// POST /api/auth/reset-password - Step 2: Verify & Reset
+// -------------------------------------------------------
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { email, securityAnswer, newPassword } = req.body;
+    if (!email || !securityAnswer || !newPassword) {
+      return res.status(400).json({ message: 'Email, answer and new password are required' });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user.securityAnswer) return res.status(400).json({ message: 'Account recovery not possible via this method' });
+
+    const isMatch = await bcrypt.compare(securityAnswer.toLowerCase().trim(), user.securityAnswer);
+    if (!isMatch) return res.status(400).json({ message: 'Incorrect security answer' });
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    res.json({ message: 'Password reset successful. You can now login.' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

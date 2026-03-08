@@ -67,8 +67,10 @@ io.on('connection', (socket) => {
     } else {
       // participant
       const Registration = require('./models/Registration');
-      const r = await Registration.findOne({ event: eventId, participant: socket.user.id, status: { $ne: 'cancelled' } });
-      if (r) authorized = true;
+      const r = await Registration.findOne({ event: eventId, participant: socket.user.id, status: { $ne: 'cancelled' } }).lean();
+      if (r) {
+        authorized = true;
+      }
     }
 
     if (authorized) {
@@ -94,7 +96,7 @@ io.on('connection', (socket) => {
       const sender = await User.findById(socket.user.id);
       if (!sender) return sendSocketError('User not found');
 
-      const senderName = sender.role === 'organizer' ? sender.organizerName : (sender.firstName + ' ' + sender.lastName);
+      const senderName = sender.role === 'admin' ? 'Admin' : (sender.role === 'organizer' ? sender.organizerName : (sender.firstName + ' ' + sender.lastName));
       const senderRole = sender.role === 'admin' ? 'Admin' : (sender.role === 'organizer' ? 'Organizer' : 'Participant');
 
       const newMessage = await ForumMessage.create({

@@ -34,6 +34,7 @@ const registrationSchema = new mongoose.Schema({
   // Merchandise-specific fields
   variant:      { size: String, color: String },
   quantity:     { type: Number, default: 1 },
+  productDetails: String, // Added mandatory field for merchandise (orders)
   paymentProof: String, // path to uploaded image file
 
   // Attendance tracking

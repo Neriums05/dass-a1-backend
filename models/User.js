@@ -45,7 +45,11 @@ const userSchema = new mongoose.Schema({
     requestedAt: Date,
     resolvedAt:  Date,
     adminComment: String
-  }]
+  }],
+
+  // --- Forgot Password Security (Requirement: participants) ---
+  securityQuestion: String,
+  securityAnswer:   String // stored hashed for extra security
 
 }, { timestamps: true }); // adds createdAt and updatedAt automatically
 
