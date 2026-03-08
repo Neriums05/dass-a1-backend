@@ -1,10 +1,10 @@
 // Feedback routes: submit anonymous feedback, view aggregated feedback
 
 const router = require('express').Router();
-const Feedback = require('../../models/Feedback');
-const Registration = require('../../models/Registration');
-const Event = require('../../models/Event');
-const { auth, requireRole } = require('../../middleware/auth');
+const Feedback = require('../models/Feedback');
+const Registration = require('../models/Registration');
+const Event = require('../models/Event');
+const { auth, requireRole } = require('../middleware/auth');
 
 // -------------------------------------------------------
 // POST /api/feedback/:eventId

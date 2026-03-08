@@ -5,10 +5,10 @@
 // Order: /trending -> /mine/all -> /by-organizer/:id -> /:id/attend -> /:id/attendance -> /:id
 
 const router = require('express').Router();
-const Event = require('../../models/Event');
-const User = require('../../models/User');
-const Registration = require('../../models/Registration');
-const { requireRole } = require('../../middleware/auth');
+const Event = require('../models/Event');
+const User = require('../models/User');
+const Registration = require('../models/Registration');
+const { requireRole } = require('../middleware/auth');
 
 // Helper: post a new event notification to Discord via webhook
 // Uses the built-in fetch (Node 18+). Silently fails if no webhook configured.

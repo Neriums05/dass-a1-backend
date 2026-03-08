@@ -3,7 +3,7 @@
 // Admin credentials come from the .env file.
 
 const bcrypt = require('bcryptjs');
-const User = require('../../models/User');
+const User = require('../models/User');
 
 async function seedAdmin() {
   // Check if any admin already exists

@@ -1,8 +1,8 @@
 // Organizer routes: list organizers, update profile, request password reset
 
 const router = require('express').Router();
-const User = require('../../models/User');
-const { requireRole } = require('../../middleware/auth');
+const User = require('../models/User');
+const { requireRole } = require('../middleware/auth');
 
 // -------------------------------------------------------
 // PUT /api/organizers/profile

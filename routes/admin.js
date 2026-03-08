@@ -1,11 +1,11 @@
 // Admin routes: manage organizers, handle password reset requests
 
 const router = require('express').Router();
-const User = require('../../models/User');
-const Event = require('../../models/Event');
-const Registration = require('../../models/Registration');
+const User = require('../models/User');
+const Event = require('../models/Event');
+const Registration = require('../models/Registration');
 const bcrypt = require('bcryptjs');
-const { requireRole } = require('../../middleware/auth');
+const { requireRole } = require('../middleware/auth');
 
 function buildOrganizerLoginEmail(organizerName) {
   return organizerName

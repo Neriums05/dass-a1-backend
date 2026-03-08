@@ -9,8 +9,8 @@ require('dotenv').config(); // loads variables from .env file
 const http = require('http');
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
-const Event = require('../models/Event');
-const ForumMessage = require('../models/ForumMessage');
+const Event = require('./models/Event');
+const ForumMessage = require('./models/ForumMessage');
 
 const app = express();
 const server = http.createServer(app);
@@ -66,7 +66,7 @@ io.on('connection', (socket) => {
       if (e) authorized = true;
     } else {
       // participant
-      const Registration = require('../models/Registration');
+      const Registration = require('./models/Registration');
       const r = await Registration.findOne({ event: eventId, participant: socket.user.id, status: { $ne: 'cancelled' } });
       if (r) authorized = true;
     }
@@ -90,7 +90,7 @@ io.on('connection', (socket) => {
       }
 
       // Populate identity from DB to prevent spoofing
-      const User = require('../models/User');
+      const User = require('./models/User');
       const sender = await User.findById(socket.user.id);
       if (!sender) return sendSocketError('User not found');
 

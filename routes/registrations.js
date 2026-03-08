@@ -1,9 +1,9 @@
 // Registration routes: register for events, buy merchandise, upload payment proof, approve payments
 
 const router = require('express').Router();
-const Registration = require('../../models/Registration');
-const Event = require('../../models/Event');
-const { requireRole } = require('../../middleware/auth');
+const Registration = require('../models/Registration');
+const Event = require('../models/Event');
+const { requireRole } = require('../middleware/auth');
 const { v4: uuidv4 } = require('uuid');
 const QRCode = require('qrcode');
 const { sendEmail } = require('../utils/email');

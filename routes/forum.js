@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const ForumMessage = require('../../models/ForumMessage');
-const { auth } = require('../../middleware/auth');
+const ForumMessage = require('../models/ForumMessage');
+const { auth } = require('../middleware/auth');
 
 // Get chat history for an event
 router.get('/:eventId', auth, async (req, res) => {
