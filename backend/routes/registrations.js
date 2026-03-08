@@ -65,6 +65,9 @@ router.post('/register/:eventId', ...requireRole('participant'), async (req, res
     if (event.registrationDeadline && new Date() > event.registrationDeadline) {
       return res.status(400).json({ message: 'Registration deadline has passed' });
     }
+    if (event.startDate && new Date() > event.startDate) {
+      return res.status(400).json({ message: 'Event has already started' });
+    }
 
     // Check if registration limit is reached
     const totalRegistered = await Registration.countDocuments({
@@ -140,6 +143,9 @@ router.post('/merch/:eventId', ...requireRole('participant'), async (req, res) =
 
     if (event.registrationDeadline && new Date() > event.registrationDeadline) {
       return res.status(400).json({ message: 'Order deadline has passed' });
+    }
+    if (event.startDate && new Date() > event.startDate) {
+      return res.status(400).json({ message: 'Event has already occurred' });
     }
 
     if (!event.variants || event.variants.length === 0) {

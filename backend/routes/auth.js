@@ -16,7 +16,9 @@ function createToken(user) {
 }
 
 function isIIITEmail(email) {
-  return email.endsWith('@iiit.ac.in') || email.endsWith('@students.iiit.ac.in');
+  return email.endsWith('@iiit.ac.in') || 
+         email.endsWith('@students.iiit.ac.in') || 
+         email.endsWith('@research.iiit.ac.in');
 }
 
 function getDisplayName(user) {
@@ -46,7 +48,9 @@ router.post('/register', async (req, res) => {
     // IIIT students must use their IIIT email
     if (participantType === 'iiit') {
       if (!isIIITEmail(email)) {
-        return res.status(400).json({ message: 'IIIT participants must register with an @iiit.ac.in email' });
+        return res.status(400).json({ 
+          message: 'IIIT students must use a valid institutional email (@iiit.ac.in, @students.iiit.ac.in, or @research.iiit.ac.in)' 
+        });
       }
     }
 
@@ -96,7 +100,7 @@ router.post('/login', async (req, res) => {
     // Compare entered password with stored hash
     const passwordMatches = await bcrypt.compare(password, user.password);
     if (!passwordMatches) {
-      return res.status(400).json({ message: 'Invalid email or password' });
+      return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     // Build a friendly display name depending on role

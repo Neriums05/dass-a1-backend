@@ -143,6 +143,7 @@ router.put('/reset-requests/:id', ...requireRole('admin'), async (req, res) => {
       // Push to history before updating status
       user.passwordResetHistory.push(buildResetHistoryEntry(user, 'approved', adminComment));
       user.passwordResetRequest.status      = 'approved';
+      user.passwordResetRequest.tempPasswordExpiresAt = undefined; // Ensure it's cleared if it existed
       user.passwordResetRequest.adminComment = adminComment;
       await user.save();
 

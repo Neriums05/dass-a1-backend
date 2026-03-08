@@ -56,18 +56,52 @@ io.on('connection', (socket) => {
     return true;
   }
 
-  socket.on('joinRoom', (eventId) => {
-    socket.join(eventId);
+  socket.on('joinRoom', async (eventId) => {
+    // Basic verification: user must either be the organizer, an admin, or a registered participant
+    // to "join" the room and listen to messages.
+    let authorized = false;
+    if (socket.user.role === 'admin') authorized = true;
+    else if (socket.user.role === 'organizer') {
+      const e = await Event.findOne({ _id: eventId, organizer: socket.user.id });
+      if (e) authorized = true;
+    } else {
+      // participant
+      const Registration = require('./models/Registration');
+      const r = await Registration.findOne({ event: eventId, participant: socket.user.id, status: { $ne: 'cancelled' } });
+      if (r) authorized = true;
+    }
+
+    if (authorized) {
+      socket.join(eventId);
+    } else {
+      sendSocketError('Access denied: You are not involved in this event');
+    }
   });
 
   socket.on('sendMessage', async (data) => {
-    const { eventId, senderName, senderRole, text } = data;
+    const { eventId, text } = data;
+    if (!text || !text.trim()) return;
+
     try {
+      // Verify user is in the room (or authorized)
+      if (!socket.rooms.has(eventId)) {
+        sendSocketError('You must join the event forum before sending messages');
+        return;
+      }
+
+      // Populate identity from DB to prevent spoofing
+      const User = require('./models/User');
+      const sender = await User.findById(socket.user.id);
+      if (!sender) return sendSocketError('User not found');
+
+      const senderName = sender.role === 'organizer' ? sender.organizerName : (sender.firstName + ' ' + sender.lastName);
+      const senderRole = sender.role === 'admin' ? 'Admin' : (sender.role === 'organizer' ? 'Organizer' : 'Participant');
+
       const newMessage = await ForumMessage.create({
         event: eventId,
         senderName,
         senderRole,
-        text
+        text: text.trim().slice(0, 1000) // basic length limit
       });
       io.to(eventId).emit('messageReceived', newMessage);
     } catch (err) {

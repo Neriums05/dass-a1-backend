@@ -39,6 +39,7 @@ const registrationSchema = new mongoose.Schema({
   // Attendance tracking
   attended:   { type: Boolean, default: false },
   attendedAt: Date,
+  attendanceMethod: { type: String, enum: ['scan', 'manual'] }, // for audit logging (Requirement 13.1.3)
 
   // Feedback tracking - prevents duplicate feedback submissions
   feedbackSubmitted: { type: Boolean, default: false }

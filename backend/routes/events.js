@@ -55,13 +55,20 @@ router.get('/', async (req, res) => {
       .sort({ createdAt: -1 });
 
     // If search term given, filter client-side so we can match organizer name too
-    if (search) {
-      const re = new RegExp(search, 'i');
-      events = events.filter(e =>
-        re.test(e.name) ||
-        e.tags?.some(t => re.test(t)) ||
-        re.test(e.organizer?.organizerName || '')
-      );
+    if (search && search.trim()) {
+      const terms = search.trim().split(/\s+/).filter(Boolean);
+      const regexes = terms.map(t => new RegExp(t, 'i'));
+      
+      events = events.filter(e => {
+        const textToMatch = [
+          e.name,
+          ...(e.tags || []),
+          e.organizer?.organizerName || ''
+        ].join(' ');
+        
+        // Multi-term matching: all terms must match somewhere in the text
+        return regexes.every(re => re.test(textToMatch));
+      });
     }
 
     res.json(events);
@@ -120,8 +127,41 @@ router.get('/by-organizer/:organizerId', async (req, res) => {
 });
 
 // -------------------------------------------------------
+// GET /api/events/:id/export-csv — organizer: export participant list as CSV
+// -------------------------------------------------------
+router.get('/:id/export-csv', ...requireRole('organizer'), async (req, res) => {
+  try {
+    const event = await findOwnedEvent(req.params.id, req.user.id);
+    if (!event) return res.status(403).json({ message: 'Access denied' });
+
+    const regs = await Registration.find({ event: req.params.id })
+      .populate('participant', 'firstName lastName email contactNumber');
+
+    const headers = ['Name', 'Email', 'Contact', 'Ticket ID', 'Status', 'Attended', 'Attended At'];
+    const rows = regs.map(r => [
+      ((r.participant?.firstName || '') + ' ' + (r.participant?.lastName || '')).trim(),
+      r.participant?.email || '',
+      r.participant?.contactNumber || '',
+      r.ticketId || '',
+      r.status,
+      r.attended ? 'Yes' : 'No',
+      r.attendedAt ? new Date(r.attendedAt).toISOString() : ''
+    ]);
+
+    const csv = [headers, ...rows].map(row => 
+      row.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')
+    ).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="event-${req.params.id}-participants.csv"`);
+    res.send(csv);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// -------------------------------------------------------
 // GET /api/events/:id/attendance — organizer: full attendance list
-// MUST be before /:id (otherwise 'attendance' matches as event ID)
 // -------------------------------------------------------
 router.get('/:id/attendance', ...requireRole('organizer'), async (req, res) => {
   try {
@@ -147,7 +187,7 @@ router.post('/:id/attend', ...requireRole('organizer'), async (req, res) => {
     const event = await findOwnedEvent(req.params.id, req.user.id);
     if (!event) return res.status(403).json({ message: 'Access denied: not your event' });
 
-    const { ticketId } = req.body;
+    const { ticketId, method } = req.body;
 
     if (!ticketId || !ticketId.trim()) {
       return res.status(400).json({ message: 'Ticket ID is required' });
@@ -168,9 +208,10 @@ router.post('/:id/attend', ...requireRole('organizer'), async (req, res) => {
       return res.status(400).json({ message: 'This registration is not active' });
     }
 
-    reg.attended   = true;
-    reg.attendedAt = new Date();
-    reg.status     = 'attended';
+    reg.attended         = true;
+    reg.attendedAt       = new Date();
+    reg.status           = 'attended';
+    reg.attendanceMethod = method || 'manual'; // audit log: scan or manual (Requirement 13.1.3)
     await reg.save();
 
     res.json({ message: 'Attendance marked!', participant: reg.participant });
@@ -217,9 +258,17 @@ router.get('/:id', async (req, res) => {
 // -------------------------------------------------------
 router.post('/', ...requireRole('organizer'), async (req, res) => {
   try {
-    const { name, eventType } = req.body;
+    const { name, eventType, startDate, endDate, registrationDeadline } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ message: 'Event name is required' });
     if (!eventType) return res.status(400).json({ message: 'Event type is required' });
+
+    // Date validation
+    if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
+      return res.status(400).json({ message: 'End date cannot be before start date' });
+    }
+    if (registrationDeadline && startDate && new Date(registrationDeadline) > new Date(startDate)) {
+      return res.status(400).json({ message: 'Registration deadline cannot be after start date' });
+    }
 
     let { tags, customForm, variants } = req.body;
     if (tags && typeof tags === 'string') tags = tags.split(',').map(t => t.trim()).filter(Boolean);
@@ -259,6 +308,18 @@ router.put('/:id', ...requireRole('organizer'), async (req, res) => {
     const oldStatus = event.status;
 
     if (event.status === 'draft') {
+      // Draft events: full validation
+      const sDate = req.body.startDate !== undefined ? req.body.startDate : event.startDate;
+      const eDate = req.body.endDate !== undefined ? req.body.endDate : event.endDate;
+      const rDead = req.body.registrationDeadline !== undefined ? req.body.registrationDeadline : event.registrationDeadline;
+
+      if (sDate && eDate && new Date(eDate) < new Date(sDate)) {
+        return res.status(400).json({ message: 'End date cannot be before start date' });
+      }
+      if (rDead && sDate && new Date(rDead) > new Date(sDate)) {
+        return res.status(400).json({ message: 'Registration deadline cannot be after start date' });
+      }
+
       // Draft events can be fully edited - update any field that was sent
       if (req.body.name !== undefined)                 event.name = req.body.name;
       if (req.body.description !== undefined)          event.description = req.body.description;
@@ -275,9 +336,16 @@ router.put('/:id', ...requireRole('organizer'), async (req, res) => {
       if (req.body.purchaseLimitPerParticipant !== undefined) event.purchaseLimitPerParticipant = req.body.purchaseLimitPerParticipant;
       if (req.body.status !== undefined)               event.status = req.body.status;
     } else if (event.status === 'published') {
-      // Published events: only limited fields can change
+      // Published: validate registrationDeadline if changed
+      if (req.body.registrationDeadline) {
+        const sDate = event.startDate;
+        if (sDate && new Date(req.body.registrationDeadline) > new Date(sDate)) {
+          return res.status(400).json({ message: 'Registration deadline cannot be after start date' });
+        }
+        event.registrationDeadline = req.body.registrationDeadline;
+      }
+      // Other published fields...
       if (req.body.description !== undefined)          event.description = req.body.description;
-      if (req.body.registrationDeadline)               event.registrationDeadline = req.body.registrationDeadline;
       if (req.body.registrationLimit && Number(req.body.registrationLimit) > (event.registrationLimit || 0)) {
         event.registrationLimit = Number(req.body.registrationLimit);
       }
