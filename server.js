@@ -1,10 +1,7 @@
-// This is the starting point of the backend.
-// It sets up Express, connects to MongoDB, and registers all routes.
-
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config(); // loads variables from .env file
+require('dotenv').config();
 
 const http = require('http');
 const { Server } = require('socket.io');
@@ -21,7 +18,6 @@ const io = new Server(server, {
   }
 });
 
-// Socket.io authentication middleware
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) {
@@ -30,14 +26,13 @@ io.use((socket, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    socket.user = decoded; // Attach user info to socket
+    socket.user = decoded;
     next();
   } catch (err) {
     next(new Error('Authentication error: Invalid token'));
   }
 });
 
-// Setup sockets
 io.on('connection', (socket) => {
   const sendSocketError = (message) => socket.emit('error', { message });
 
@@ -57,15 +52,12 @@ io.on('connection', (socket) => {
   }
 
   socket.on('joinRoom', async (eventId) => {
-    // Basic verification: user must either be the organizer, an admin, or a registered participant
-    // to "join" the room and listen to messages.
     let authorized = false;
     if (socket.user.role === 'admin') authorized = true;
     else if (socket.user.role === 'organizer') {
       const e = await Event.findOne({ _id: eventId, organizer: socket.user.id });
       if (e) authorized = true;
     } else {
-      // participant
       const Registration = require('./models/Registration');
       const r = await Registration.findOne({ event: eventId, participant: socket.user.id, status: { $ne: 'cancelled' } }).lean();
       if (r) {
@@ -85,13 +77,11 @@ io.on('connection', (socket) => {
     if (!text || !text.trim()) return;
 
     try {
-      // Verify user is in the room (or authorized)
       if (!socket.rooms.has(eventId)) {
         sendSocketError('You must join the event forum before sending messages');
         return;
       }
 
-      // Populate identity from DB to prevent spoofing
       const User = require('./models/User');
       const sender = await User.findById(socket.user.id);
       if (!sender) return sendSocketError('User not found');
@@ -103,7 +93,7 @@ io.on('connection', (socket) => {
         event: eventId,
         senderName,
         senderRole,
-        text: text.trim().slice(0, 1000) // basic length limit
+        text: text.trim().slice(0, 1000)
       });
       io.to(eventId).emit('messageReceived', newMessage);
     } catch (err) {
@@ -148,17 +138,10 @@ io.on('connection', (socket) => {
   });
 });
 
-// Allow requests from the frontend
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
-
-// Parse incoming JSON request bodies
 app.use(express.json());
-
-// Serve uploaded files (payment proofs) as static files
 app.use('/uploads', express.static('uploads'));
 
-// Register all route files
-// Each file handles a specific part of the API
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/events', require('./routes/events'));
 app.use('/api/registrations', require('./routes/registrations'));
@@ -167,15 +150,10 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/api/feedback', require('./routes/feedback'));
 app.use('/api/forum', require('./routes/forum'));
 
-// Connect to MongoDB, then start the server
 mongoose.connect(process.env.MONGO_URI)
   .then(async () => {
     console.log('Connected to MongoDB');
-
-    // Create the admin account if it doesn't exist yet
     await require('./utils/seedAdmin')();
-
-    // Start listening for requests
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => console.log('Server running on port ' + PORT));
   })

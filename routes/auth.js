@@ -1,17 +1,14 @@
-// Authentication routes: register, login, get profile, update profile, change password
-
 const router = require('express').Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { auth } = require('../middleware/auth');
 
-// Helper: creates a JWT token for a user
 function createToken(user) {
   return jwt.sign(
     { id: user._id, role: user.role, email: user.email },
     process.env.JWT_SECRET,
-    { expiresIn: '7d' } // token is valid for 7 days
+    { expiresIn: '7d' }
   );
 }
 
@@ -33,10 +30,6 @@ function assignIfDefined(target, source, fields) {
   }
 }
 
-// -------------------------------------------------------
-// POST /api/auth/register
-// Creates a new participant account
-// -------------------------------------------------------
 router.post('/register', async (req, res) => {
   try {
     let { email, password, firstName, lastName, participantType, college, contactNumber, securityQuestion, securityAnswer } = req.body;
@@ -49,21 +42,18 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'Contact Number must be exactly 10 digits' });
     }
 
-    // IIIT students must use their IIIT email and have college set to IIIT
     if (participantType === 'iiit') {
       if (!isIIITEmail(email)) {
         return res.status(400).json({ message: 'IIIT students must use their institutional email' });
       }
-      college = 'IIIT'; // Set college to 'IIIT' if participantType is 'iiit'
+      college = 'IIIT';
     }
 
-    // Check if email is already taken
     const existing = await User.findOne({ email });
     if (existing) {
       return res.status(400).json({ message: 'An account with this email already exists' });
     }
 
-    // Hash password (never store plain text)
     const hashedPassword = await bcrypt.hash(password, 10);
     const hashedAnswer = await bcrypt.hash(securityAnswer.toLowerCase().trim(), 10);
 
@@ -73,7 +63,6 @@ router.post('/register', async (req, res) => {
       securityQuestion, securityAnswer: hashedAnswer
     });
 
-    // Send back a token so the user is immediately logged in
     const token = createToken(user);
     res.json({
       token,
@@ -85,10 +74,6 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// POST /api/auth/login
-// Works for all roles: participant, organizer, admin
-// -------------------------------------------------------
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -96,19 +81,16 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    // Find user by email
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
 
-    // Compare entered password with stored hash
     const passwordMatches = await bcrypt.compare(password, user.password);
     if (!passwordMatches) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
-    // Build a friendly display name depending on role
     const name = getDisplayName(user);
 
     const token = createToken(user);
@@ -122,29 +104,19 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/auth/me
-// Returns the full profile of the logged-in user
-// -------------------------------------------------------
 router.get('/me', auth, async (req, res) => {
-  // req.user.id is set by the auth middleware after verifying the token
   const user = await User.findById(req.user.id)
-    .select('-password') // never send password back
-    .populate('followedOrganizers', 'organizerName category'); // replace IDs with actual organizer data
+    .select('-password')
+    .populate('followedOrganizers', 'organizerName category');
   res.json(user);
 });
 
-// -------------------------------------------------------
-// PUT /api/auth/profile
-// Update participant profile fields
-// -------------------------------------------------------
 router.put('/profile', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     if (user.role === 'participant') {
-      // Ensure contactNumber is provided
       if (req.body.contactNumber !== undefined && (!req.body.contactNumber || !req.body.contactNumber.trim())) {
         return res.status(400).json({ message: 'Contact Number is required' });
       }
@@ -153,7 +125,6 @@ router.put('/profile', auth, async (req, res) => {
         return res.status(400).json({ message: 'Contact Number must be exactly 10 digits' });
       }
 
-      // Only allow updating participant fields
       assignIfDefined(user, req.body, [
         'firstName',
         'lastName',
@@ -164,12 +135,10 @@ router.put('/profile', auth, async (req, res) => {
         'hasCompletedOnboarding'
       ]);
 
-      // If they switched to IIIT type or are IIIT, ensure college is IIIT
       if (user.participantType === 'iiit') {
         user.college = 'IIIT';
       }
     }
-    // Organizers update their profile via PUT /organizers/profile instead
 
     await user.save();
     const updated = await User.findById(req.user.id).select('-password').populate('followedOrganizers', 'organizerName category');
@@ -179,10 +148,6 @@ router.put('/profile', auth, async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// PUT /api/auth/change-password
-// Allows a logged-in user to change their own password
-// -------------------------------------------------------
 router.put('/change-password', auth, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -193,7 +158,6 @@ router.put('/change-password', auth, async (req, res) => {
 
     const user = await User.findById(req.user.id);
 
-    // Verify they know their current password first
     const passwordMatches = await bcrypt.compare(currentPassword, user.password);
     if (!passwordMatches) {
       return res.status(400).json({ message: 'Current password is incorrect' });
@@ -208,9 +172,6 @@ router.put('/change-password', auth, async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// POST /api/auth/forgot-password - Step 1: Get Question
-// -------------------------------------------------------
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -226,9 +187,6 @@ router.post('/forgot-password', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// POST /api/auth/reset-password - Step 2: Verify & Reset
-// -------------------------------------------------------
 router.post('/reset-password', async (req, res) => {
   try {
     const { email, securityAnswer, newPassword } = req.body;

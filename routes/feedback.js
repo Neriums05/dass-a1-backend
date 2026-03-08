@@ -1,16 +1,9 @@
-// Feedback routes: submit anonymous feedback, view aggregated feedback
-
 const router = require('express').Router();
 const Feedback = require('../models/Feedback');
 const Registration = require('../models/Registration');
 const Event = require('../models/Event');
 const { auth, requireRole } = require('../middleware/auth');
 
-// -------------------------------------------------------
-// POST /api/feedback/:eventId
-// Participant: submit anonymous feedback for an event
-// Only allowed if they actually attended the event
-// -------------------------------------------------------
 router.post('/:eventId', ...requireRole('participant'), async (req, res) => {
   try {
     const attendance = await Registration.findOne({
@@ -23,7 +16,6 @@ router.post('/:eventId', ...requireRole('participant'), async (req, res) => {
       return res.status(403).json({ message: 'You can only leave feedback for events you attended' });
     }
 
-    // Prevent duplicate feedback using a flag on the registration
     if (attendance.feedbackSubmitted) {
       return res.status(400).json({ message: 'You have already submitted feedback for this event' });
     }
@@ -35,10 +27,8 @@ router.post('/:eventId', ...requireRole('participant'), async (req, res) => {
 
     const { comment } = req.body;
 
-    // Note: we do NOT store req.user.id in Feedback - that's what makes it anonymous
     await Feedback.create({ event: req.params.eventId, rating, comment });
 
-    // Mark feedback as submitted on the registration (prevents duplicates)
     attendance.feedbackSubmitted = true;
     await attendance.save();
 

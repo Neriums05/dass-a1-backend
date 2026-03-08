@@ -1,18 +1,12 @@
-// Organizer routes: list organizers, update profile, request password reset
-
 const router = require('express').Router();
 const User = require('../models/User');
 const { requireRole } = require('../middleware/auth');
 
-// -------------------------------------------------------
-// PUT /api/organizers/profile
-// Organizer: update their own profile
-// NOTE: must be before /:id to avoid 'profile' being treated as an ID
-// -------------------------------------------------------
+// Must be before /:id
 router.put('/profile', ...requireRole('organizer'), async (req, res) => {
   try {
     const { organizerName, category, description, contactEmail, discordWebhook, contactNumber } = req.body;
-    
+
     if (contactNumber && contactNumber.length !== 10) {
       return res.status(400).json({ message: 'Contact Number must be exactly 10 digits' });
     }
@@ -28,16 +22,11 @@ router.put('/profile', ...requireRole('organizer'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// POST /api/organizers/request-reset
-// Organizer: ask admin to reset their password
-// NOTE: must be before /:id
-// -------------------------------------------------------
+// Must be before /:id
 router.post('/request-reset', ...requireRole('organizer'), async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
 
-    // Prevent spamming: block if a request is already pending
     if (user.passwordResetRequest?.status === 'pending') {
       return res.status(400).json({ message: 'You already have a pending reset request. Please wait for admin review.' });
     }
@@ -58,10 +47,6 @@ router.post('/request-reset', ...requireRole('organizer'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/organizers
-// Public: list all organizers (for participants to browse/follow)
-// -------------------------------------------------------
 router.get('/', async (req, res) => {
   try {
     const organizers = await User.find({ role: 'organizer' })

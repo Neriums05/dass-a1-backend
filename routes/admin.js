@@ -1,5 +1,3 @@
-// Admin routes: manage organizers, handle password reset requests
-
 const router = require('express').Router();
 const User = require('../models/User');
 const Event = require('../models/Event');
@@ -29,11 +27,6 @@ function buildResetHistoryEntry(user, status, adminComment) {
   };
 }
 
-// -------------------------------------------------------
-// POST /api/admin/organizer
-// Admin: create a new organizer account
-// Auto-generates login email and a random password
-// -------------------------------------------------------
 router.post('/organizer', ...requireRole('admin'), async (req, res) => {
   try {
     const { organizerName, category, description, contactEmail } = req.body;
@@ -44,10 +37,8 @@ router.post('/organizer', ...requireRole('admin'), async (req, res) => {
     if (!category || !category.trim()) return res.status(400).json({ message: 'Category is required' });
     if (!contactEmail || !contactEmail.trim()) return res.status(400).json({ message: 'Contact email is required' });
 
-    // Generate a login email based on the organizer name
     const loginEmail = buildOrganizerLoginEmail(organizerName);
 
-    // Check for duplicate email
     const existing = await User.findOne({ email: loginEmail });
     if (existing) {
       return res.status(400).json({ message: 'An organizer with this name already exists (email conflict: ' + loginEmail + ')' });
@@ -70,10 +61,6 @@ router.post('/organizer', ...requireRole('admin'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/admin/organizers
-// Admin: list all organizer accounts
-// -------------------------------------------------------
 router.get('/organizers', ...requireRole('admin'), async (req, res) => {
   try {
     const organizers = await User.find({ role: 'organizer' }).select('-password').lean();
@@ -83,10 +70,6 @@ router.get('/organizers', ...requireRole('admin'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// DELETE /api/admin/organizer/:id
-// Admin: remove an organizer account
-// -------------------------------------------------------
 router.delete('/organizer/:id', ...requireRole('admin'), async (req, res) => {
   try {
     const organizer = await User.findById(req.params.id);
@@ -94,7 +77,6 @@ router.delete('/organizer/:id', ...requireRole('admin'), async (req, res) => {
       return res.status(404).json({ message: 'Organizer not found' });
     }
 
-    // Clean up all events and their registrations before deleting the organizer
     const events = await Event.find({ organizer: req.params.id }).lean();
     const eventIds = events.map(e => e._id);
 
@@ -110,10 +92,6 @@ router.delete('/organizer/:id', ...requireRole('admin'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/admin/reset-requests
-// Admin: get all pending password reset requests from organizers
-// -------------------------------------------------------
 router.get('/reset-requests', ...requireRole('admin'), async (req, res) => {
   try {
     const requests = await User.find({
@@ -126,11 +104,6 @@ router.get('/reset-requests', ...requireRole('admin'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// PUT /api/admin/reset-requests/:id
-// Admin: approve or reject a password reset request
-// If approved, generates a new password and returns it to admin
-// -------------------------------------------------------
 router.put('/reset-requests/:id', ...requireRole('admin'), async (req, res) => {
   try {
     const { action, adminComment } = req.body;
@@ -141,10 +114,9 @@ router.put('/reset-requests/:id', ...requireRole('admin'), async (req, res) => {
       const newPassword = generatePassword('New@');
       user.password = await bcrypt.hash(newPassword, 10);
 
-      // Push to history before updating status
       user.passwordResetHistory.push(buildResetHistoryEntry(user, 'approved', adminComment));
       user.passwordResetRequest.status = 'approved';
-      user.passwordResetRequest.tempPasswordExpiresAt = undefined; // Ensure it's cleared if it existed
+      user.passwordResetRequest.tempPasswordExpiresAt = undefined;
       user.passwordResetRequest.adminComment = adminComment;
       await user.save();
 
@@ -160,7 +132,6 @@ router.put('/reset-requests/:id', ...requireRole('admin'), async (req, res) => {
       return res.json({ message: 'Approved', newPassword });
 
     } else {
-      // Push rejected entry to history too
       user.passwordResetHistory.push(buildResetHistoryEntry(user, 'rejected', adminComment));
       user.passwordResetRequest.status = 'rejected';
       user.passwordResetRequest.adminComment = adminComment;

@@ -1,5 +1,3 @@
-// Registration routes: register for events, buy merchandise, upload payment proof, approve payments
-
 const router = require('express').Router();
 const Registration = require('../models/Registration');
 const Event = require('../models/Event');
@@ -11,24 +9,17 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Make sure the uploads folder exists
 if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
 
-// Multer saves uploaded files to the 'uploads/' folder
 const storage = multer.diskStorage({
   destination: 'uploads/',
   filename: (req, file, cb) => {
-    // Use timestamp to avoid filename collisions
     cb(null, Date.now() + path.extname(file.originalname));
   }
 });
 const upload = multer({ storage });
 
-// -------------------------------------------------------
-// GET /api/registrations/mine
-// Participant: get all their own registrations
-// NOTE: must be before /event/:eventId to avoid route conflict
-// -------------------------------------------------------
+// Must be before /event/:eventId to avoid route conflict
 router.get('/mine', ...requireRole('participant'), async (req, res) => {
   try {
     const registrations = await Registration.find({ participant: req.user.id })
@@ -45,21 +36,15 @@ router.get('/mine', ...requireRole('participant'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// POST /api/registrations/register/:eventId
-// Participant registers for a normal event
-// -------------------------------------------------------
 router.post('/register/:eventId', ...requireRole('participant'), async (req, res) => {
   try {
     const event = await Event.findById(req.params.eventId);
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    // Participants should use /merch/:eventId for merchandise events
     if (event.eventType === 'merchandise') {
       return res.status(400).json({ message: 'Use the merchandise endpoint to purchase this item' });
     }
 
-    // Validation checks
     if (!['published', 'ongoing'].includes(event.status)) {
       return res.status(400).json({ message: 'Event is not open for registration' });
     }
@@ -70,7 +55,6 @@ router.post('/register/:eventId', ...requireRole('participant'), async (req, res
       return res.status(400).json({ message: 'Event has already started' });
     }
 
-    // Check if registration limit is reached
     const totalRegistered = await Registration.countDocuments({
       event: event._id,
       status: { $ne: 'cancelled' }
@@ -79,7 +63,6 @@ router.post('/register/:eventId', ...requireRole('participant'), async (req, res
       return res.status(400).json({ message: 'This event is full' });
     }
 
-    // Check if this participant already registered (and didn't cancel)
     const alreadyRegistered = await Registration.findOne({
       event: event._id,
       participant: req.user.id,
@@ -89,18 +72,13 @@ router.post('/register/:eventId', ...requireRole('participant'), async (req, res
       return res.status(400).json({ message: 'You have already registered for this event' });
     }
 
-    // Lock the custom form once the first registration comes in
-    // (so organizer can't change questions after people have answered)
     if (!event.formLocked && event.eventType === 'normal') {
       event.formLocked = true;
       await event.save();
     }
 
-    // Generate a unique ticket ID
     const ticketId = 'TKT-' + uuidv4().slice(0, 8).toUpperCase();
 
-    // Generate QR code containing the ticket ID
-    // This base64 string can be used directly as <img src="...">
     const qrData = JSON.stringify({ ticketId, eventId: event._id });
     const qrCode = await QRCode.toDataURL(qrData);
 
@@ -112,7 +90,6 @@ router.post('/register/:eventId', ...requireRole('participant'), async (req, res
       formResponses: req.body.formResponses || {}
     });
 
-    // Send confirmation email with QR code
     const emailHtml = `
       <h2>You're registered for ${event.name}!</h2>
       <p>Your Ticket ID: <strong>${ticketId}</strong></p>
@@ -127,10 +104,6 @@ router.post('/register/:eventId', ...requireRole('participant'), async (req, res
   }
 });
 
-// -------------------------------------------------------
-// POST /api/registrations/merch/:eventId
-// Participant places a merchandise order (status = pending_payment)
-// -------------------------------------------------------
 router.post('/merch/:eventId', ...requireRole('participant'), async (req, res) => {
   try {
     const event = await Event.findById(req.params.eventId);
@@ -168,7 +141,6 @@ router.post('/merch/:eventId', ...requireRole('participant'), async (req, res) =
       return res.status(400).json({ message: 'Quantity must be a whole number greater than 0' });
     }
 
-    // Check stock for the chosen variant
     const variantData = event.variants.find(
       v => v.size === variant.size && v.color === variant.color
     );
@@ -176,7 +148,6 @@ router.post('/merch/:eventId', ...requireRole('participant'), async (req, res) =
       return res.status(400).json({ message: 'Out of stock' });
     }
 
-    // Check how many this participant has already bought
     const existingOrders = await Registration.find({
       event: event._id,
       participant: req.user.id,
@@ -193,7 +164,7 @@ router.post('/merch/:eventId', ...requireRole('participant'), async (req, res) =
       event: event._id,
       participant: req.user.id,
       ticketId,
-      status: 'pending_payment', // wait for payment proof upload
+      status: 'pending_payment',
       variant,
       quantity: orderQuantity,
       productDetails
@@ -208,10 +179,6 @@ router.post('/merch/:eventId', ...requireRole('participant'), async (req, res) =
   }
 });
 
-// -------------------------------------------------------
-// POST /api/registrations/payment-proof/:regId
-// Participant uploads payment screenshot for a merch order
-// -------------------------------------------------------
 router.post('/payment-proof/:regId', ...requireRole('participant'), upload.single('proof'), async (req, res) => {
   try {
     const reg = await Registration.findOne({ _id: req.params.regId, participant: req.user.id });
@@ -226,7 +193,6 @@ router.post('/payment-proof/:regId', ...requireRole('participant'), upload.singl
     }
 
     reg.paymentProof = req.file.path;
-    // Reset status to pending_payment if it was rejected (re-submission)
     if (reg.status === 'payment_rejected') {
       reg.status = 'pending_payment';
     }
@@ -238,10 +204,6 @@ router.post('/payment-proof/:regId', ...requireRole('participant'), upload.singl
   }
 });
 
-// -------------------------------------------------------
-// PUT /api/registrations/approve/:regId
-// Organizer approves or rejects a merchandise payment
-// -------------------------------------------------------
 router.put('/approve/:regId', ...requireRole('organizer'), async (req, res) => {
   try {
     const reg = await Registration.findById(req.params.regId)
@@ -250,19 +212,17 @@ router.put('/approve/:regId', ...requireRole('organizer'), async (req, res) => {
 
     if (!reg) return res.status(404).json({ message: 'Registration not found' });
 
-    // Ensure this organizer owns the event being approved
     if (reg.event.organizer.toString() !== req.user.id) {
       return res.status(403).json({ message: 'Access denied: not your event' });
     }
 
-    const { action } = req.body; // 'approve' or 'reject'
+    const { action } = req.body;
 
     if (!['approve', 'reject'].includes(action)) {
       return res.status(400).json({ message: 'Invalid action. Must be "approve" or "reject"' });
     }
 
     if (action === 'approve') {
-      // Basic approval preconditions + stock safety checks
       if (reg.event?.eventType !== 'merchandise') {
         return res.status(400).json({ message: 'This approval endpoint is only for merchandise orders' });
       }
@@ -273,7 +233,6 @@ router.put('/approve/:regId', ...requireRole('organizer'), async (req, res) => {
         return res.status(400).json({ message: 'Payment proof not uploaded yet' });
       }
 
-      // Decrement stock for the purchased variant (re-check at approval time to avoid oversell)
       const event = reg.event;
       const variant = event.variants.find(
         v => v.size === reg.variant?.size && v.color === reg.variant?.color
@@ -292,12 +251,10 @@ router.put('/approve/:regId', ...requireRole('organizer'), async (req, res) => {
       variant.stock -= reg.quantity;
       await event.save();
 
-      // Generate QR code now that payment is confirmed
       const qrData = JSON.stringify({ ticketId: reg.ticketId });
       reg.qrCode = await QRCode.toDataURL(qrData);
       reg.status = 'registered';
 
-      // Send confirmation email
       const emailHtml = `
         <h2>Your order has been approved!</h2>
         <p>Ticket ID: <strong>${reg.ticketId}</strong></p>
@@ -316,13 +273,8 @@ router.put('/approve/:regId', ...requireRole('organizer'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/registrations/event/:eventId
-// Organizer: get all registrations for one of their events
-// -------------------------------------------------------
 router.get('/event/:eventId', ...requireRole('organizer'), async (req, res) => {
   try {
-    // Verify ownership
     const event = await Event.findOne({ _id: req.params.eventId, organizer: req.user.id });
     if (!event) return res.status(403).json({ message: 'Access denied: not your event' });
 

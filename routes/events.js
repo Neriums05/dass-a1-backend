@@ -1,8 +1,4 @@
-// Event routes: browse, view, create, update, attendance tracking
-//
-// CRITICAL ORDERING RULE: Express matches routes top-to-bottom.
-// All specific/static paths MUST come before /:id wildcards.
-// Order: /trending -> /mine/all -> /by-organizer/:id -> /:id/attend -> /:id/attendance -> /:id
+// Route order matters: specific paths before /:id wildcards.
 
 const router = require('express').Router();
 const Event = require('../models/Event');
@@ -10,13 +6,11 @@ const User = require('../models/User');
 const Registration = require('../models/Registration');
 const { requireRole } = require('../middleware/auth');
 
-// Helper: post a new event notification to Discord via webhook
-// Uses the built-in fetch (Node 18+). Silently fails if no webhook configured.
 async function fireDiscordWebhook(webhookUrl, event) {
   if (!webhookUrl) return;
   try {
-    const message = '🎉 **New Event Published: ' + event.name + '**\n' +
-      '📅 ' + (event.startDate ? new Date(event.startDate).toDateString() : 'TBD') + '\n' +
+    const message = '**New Event Published: ' + event.name + '**\n' +
+      (event.startDate ? new Date(event.startDate).toDateString() : 'TBD') + '\n' +
       (event.description ? event.description.slice(0, 200) : '');
     await fetch(webhookUrl, {
       method: 'POST',
@@ -24,7 +18,6 @@ async function fireDiscordWebhook(webhookUrl, event) {
       body: JSON.stringify({ content: message })
     });
   } catch {
-    // Never crash the app if Discord webhook fails
   }
 }
 
@@ -32,9 +25,6 @@ async function findOwnedEvent(eventId, organizerId) {
   return Event.findOne({ _id: eventId, organizer: organizerId });
 }
 
-// -------------------------------------------------------
-// GET /api/events — browse all visible events with filters
-// -------------------------------------------------------
 router.get('/', async (req, res) => {
   try {
     const { search, type, dateFrom, dateTo, eligibility } = req.query;
@@ -49,13 +39,11 @@ router.get('/', async (req, res) => {
       if (dateTo) query.startDate.$lte = new Date(dateTo);
     }
 
-    // Fetch all matching events first, then filter by search (including organizer name)
     let events = await Event.find(query)
       .populate('organizer', 'organizerName category')
       .sort({ createdAt: -1 })
       .lean();
 
-    // If search term given, filter client-side so we can match organizer name too
     if (search && search.trim()) {
       const terms = search.trim().split(/\s+/).filter(Boolean);
       const regexes = terms.map(t => new RegExp(t, 'i'));
@@ -67,7 +55,6 @@ router.get('/', async (req, res) => {
           e.organizer?.organizerName || ''
         ].join(' ');
 
-        // Multi-term matching: all terms must match somewhere in the text
         return regexes.every(re => re.test(textToMatch));
       });
     }
@@ -78,10 +65,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/events/trending — top 5 by views in last 24h
-// MUST be before /:id
-// -------------------------------------------------------
 router.get('/trending', async (req, res) => {
   try {
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -99,10 +82,6 @@ router.get('/trending', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/events/mine/all — organizer: all their events
-// MUST be before /:id
-// -------------------------------------------------------
 router.get('/mine/all', ...requireRole('organizer'), async (req, res) => {
   try {
     const events = await Event.find({ organizer: req.user.id }).sort({ createdAt: -1 }).lean();
@@ -112,10 +91,6 @@ router.get('/mine/all', ...requireRole('organizer'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/events/by-organizer/:organizerId — public events by one organizer
-// MUST be before /:id
-// -------------------------------------------------------
 router.get('/by-organizer/:organizerId', async (req, res) => {
   try {
     const events = await Event.find({
@@ -128,9 +103,6 @@ router.get('/by-organizer/:organizerId', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/events/:id/export-csv — organizer: export participant list as CSV
-// -------------------------------------------------------
 router.get('/:id/export-csv', ...requireRole('organizer'), async (req, res) => {
   try {
     const event = await findOwnedEvent(req.params.id, req.user.id);
@@ -163,12 +135,8 @@ router.get('/:id/export-csv', ...requireRole('organizer'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/events/:id/attendance — organizer: full attendance list
-// -------------------------------------------------------
 router.get('/:id/attendance', ...requireRole('organizer'), async (req, res) => {
   try {
-    // Verify this organizer owns the event before returning attendance data
     const event = await findOwnedEvent(req.params.id, req.user.id);
     if (!event) return res.status(403).json({ message: 'Access denied: not your event' });
 
@@ -181,13 +149,8 @@ router.get('/:id/attendance', ...requireRole('organizer'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// POST /api/events/:id/attend — organizer: mark a ticket attended
-// MUST be before PUT /:id
-// -------------------------------------------------------
 router.post('/:id/attend', ...requireRole('organizer'), async (req, res) => {
   try {
-    // Verify this organizer owns the event
     const event = await findOwnedEvent(req.params.id, req.user.id);
     if (!event) return res.status(403).json({ message: 'Access denied: not your event' });
 
@@ -199,7 +162,7 @@ router.post('/:id/attend', ...requireRole('organizer'), async (req, res) => {
 
     const reg = await Registration.findOne({
       ticketId: ticketId.trim().toUpperCase(),
-      event: req.params.id   // must belong to THIS event
+      event: req.params.id
     }).populate('participant', 'firstName lastName email');
 
     if (!reg) {
@@ -215,7 +178,7 @@ router.post('/:id/attend', ...requireRole('organizer'), async (req, res) => {
     reg.attended = true;
     reg.attendedAt = new Date();
     reg.status = 'attended';
-    reg.attendanceMethod = method || 'manual'; // audit log: scan or manual (Requirement 13.1.3)
+    reg.attendanceMethod = method || 'manual';
     await reg.save();
 
     res.json({ message: 'Attendance marked!', participant: reg.participant });
@@ -224,9 +187,6 @@ router.post('/:id/attend', ...requireRole('organizer'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// GET /api/events/:id — single event + increment view count
-// -------------------------------------------------------
 router.get('/:id', async (req, res) => {
   try {
     const event = await Event.findById(req.params.id)
@@ -238,9 +198,6 @@ router.get('/:id', async (req, res) => {
     const todayStr = new Date().toDateString();
     const isNewDay = !event.viewsDate || event.viewsDate.toDateString() !== todayStr;
 
-    // Increment view count. If it's a new day, also reset the daily counter.
-    // Two separate update ops are needed: $inc viewCount always, plus either
-    // $set viewsToday=1 (new day) or $inc viewsToday (same day).
     if (isNewDay) {
       await Event.findByIdAndUpdate(req.params.id, {
         $inc: { viewCount: 1 },
@@ -258,16 +215,12 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// POST /api/events — organizer: create new event
-// -------------------------------------------------------
 router.post('/', ...requireRole('organizer'), async (req, res) => {
   try {
     const { name, eventType, startDate, endDate, registrationDeadline } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ message: 'Event name is required' });
     if (!eventType) return res.status(400).json({ message: 'Event type is required' });
 
-    // Date validation
     if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
       return res.status(400).json({ message: 'End date cannot be before start date' });
     }
@@ -290,7 +243,6 @@ router.post('/', ...requireRole('organizer'), async (req, res) => {
       status: req.body.status || 'draft'
     });
 
-    // If published immediately, fire Discord webhook
     if (event.status === 'published') {
       const organizer = await User.findById(req.user.id);
       fireDiscordWebhook(organizer?.discordWebhook, event);
@@ -302,20 +254,14 @@ router.post('/', ...requireRole('organizer'), async (req, res) => {
   }
 });
 
-// -------------------------------------------------------
-// PUT /api/events/:id — organizer: update event
-// Edit rules depend on current status
-// -------------------------------------------------------
 router.put('/:id', ...requireRole('organizer'), async (req, res) => {
   try {
     const event = await Event.findOne({ _id: req.params.id, organizer: req.user.id });
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    // Remember the old status so we know if it just became published
     const oldStatus = event.status;
 
     if (event.status === 'draft') {
-      // Draft events: full validation
       const sDate = req.body.startDate !== undefined ? req.body.startDate : event.startDate;
       const eDate = req.body.endDate !== undefined ? req.body.endDate : event.endDate;
       const rDead = req.body.registrationDeadline !== undefined ? req.body.registrationDeadline : event.registrationDeadline;
@@ -327,7 +273,6 @@ router.put('/:id', ...requireRole('organizer'), async (req, res) => {
         return res.status(400).json({ message: 'Registration deadline cannot be after start date' });
       }
 
-      // Draft events can be fully edited - update any field that was sent
       if (req.body.name !== undefined) event.name = req.body.name;
       if (req.body.description !== undefined) event.description = req.body.description;
       if (req.body.eventType !== undefined) event.eventType = req.body.eventType;
@@ -345,7 +290,6 @@ router.put('/:id', ...requireRole('organizer'), async (req, res) => {
       if (req.body.purchaseLimitPerParticipant !== undefined) event.purchaseLimitPerParticipant = req.body.purchaseLimitPerParticipant;
       if (req.body.status !== undefined) event.status = req.body.status;
     } else if (event.status === 'published') {
-      // Published: validate registrationDeadline if changed
       if (req.body.registrationDeadline) {
         const sDate = event.startDate;
         if (sDate && new Date(req.body.registrationDeadline) > new Date(sDate)) {
@@ -353,7 +297,6 @@ router.put('/:id', ...requireRole('organizer'), async (req, res) => {
         }
         event.registrationDeadline = req.body.registrationDeadline;
       }
-      // Other published fields...
       if (req.body.description !== undefined) event.description = req.body.description;
       if (req.body.registrationLimit && Number(req.body.registrationLimit) > (event.registrationLimit || 0)) {
         event.registrationLimit = Number(req.body.registrationLimit);
@@ -364,13 +307,11 @@ router.put('/:id', ...requireRole('organizer'), async (req, res) => {
         event.status = req.body.status;
       }
     } else {
-      // ongoing / completed / closed: only status changes allowed
       if (req.body.status) event.status = req.body.status;
     }
 
     await event.save();
 
-    // Fire Discord webhook if event just became published
     if (oldStatus !== 'published' && event.status === 'published') {
       const organizer = await User.findById(req.user.id);
       fireDiscordWebhook(organizer?.discordWebhook, event);
