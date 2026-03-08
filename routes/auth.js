@@ -32,9 +32,9 @@ function assignIfDefined(target, source, fields) {
 
 router.post('/register', async (req, res) => {
   try {
-    let { email, password, firstName, lastName, participantType, college, contactNumber, securityQuestion, securityAnswer } = req.body;
+    let { email, password, firstName, lastName, participantType, college, contactNumber } = req.body;
 
-    if (!email || !password || !firstName || !lastName || !participantType || !contactNumber || !securityQuestion || !securityAnswer) {
+    if (!email || !password || !firstName || !lastName || !participantType || !contactNumber) {
       return res.status(400).json({ message: 'All required fields must be provided' });
     }
 
@@ -55,12 +55,10 @@ router.post('/register', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const hashedAnswer = await bcrypt.hash(securityAnswer.toLowerCase().trim(), 10);
 
     const user = await User.create({
       email, password: hashedPassword, role: 'participant',
-      firstName, lastName, participantType, college, contactNumber,
-      securityQuestion, securityAnswer: hashedAnswer
+      firstName, lastName, participantType, college, contactNumber
     });
 
     const token = createToken(user);

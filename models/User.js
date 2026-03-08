@@ -22,10 +22,7 @@ const userSchema = new mongoose.Schema({
   category: String,
   description: String,
   contactEmail: String,
-  discordWebhook: String,
-
-  securityQuestion: String,
-  securityAnswer: String
+  discordWebhook: String
 
 }, { timestamps: true });
 
