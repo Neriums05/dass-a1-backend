@@ -24,22 +24,6 @@ const userSchema = new mongoose.Schema({
   contactEmail: String,
   discordWebhook: String,
 
-  passwordResetRequest: {
-    status: { type: String, enum: ['none', 'pending', 'approved', 'rejected'], default: 'none' },
-    reason: String,
-    requestedAt: Date,
-    adminComment: String
-  },
-
-
-  passwordResetHistory: [{
-    status: { type: String, enum: ['approved', 'rejected'] },
-    reason: String,
-    requestedAt: Date,
-    resolvedAt: Date,
-    adminComment: String
-  }],
-
   securityQuestion: String,
   securityAnswer: String
 

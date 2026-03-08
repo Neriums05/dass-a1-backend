@@ -172,42 +172,4 @@ router.put('/change-password', auth, async (req, res) => {
   }
 });
 
-router.post('/forgot-password', async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ message: 'Email is required' });
-
-    const user = await User.findOne({ email: email.toLowerCase() }).select('securityQuestion').lean();
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    if (!user.securityQuestion) return res.status(400).json({ message: 'No security question set for this account' });
-
-    res.json({ question: user.securityQuestion });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-router.post('/reset-password', async (req, res) => {
-  try {
-    const { email, securityAnswer, newPassword } = req.body;
-    if (!email || !securityAnswer || !newPassword) {
-      return res.status(400).json({ message: 'Email, answer and new password are required' });
-    }
-
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    if (!user.securityAnswer) return res.status(400).json({ message: 'Account recovery not possible via this method' });
-
-    const isMatch = await bcrypt.compare(securityAnswer.toLowerCase().trim(), user.securityAnswer);
-    if (!isMatch) return res.status(400).json({ message: 'Incorrect security answer' });
-
-    user.password = await bcrypt.hash(newPassword, 10);
-    await user.save();
-
-    res.json({ message: 'Password reset successful. You can now login.' });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
 module.exports = router;
