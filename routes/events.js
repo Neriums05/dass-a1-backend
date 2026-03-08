@@ -279,6 +279,8 @@ router.post('/', ...requireRole('organizer'), async (req, res) => {
     const event = await Event.create({
       ...req.body,
       tags, customForm, variants,
+      venue: req.body.venue,
+      prizePool: req.body.prizePool,
       organizer: req.user.id,
       status: req.body.status || 'draft'
     });
@@ -328,6 +330,8 @@ router.put('/:id', ...requireRole('organizer'), async (req, res) => {
       if (req.body.startDate !== undefined) event.startDate = req.body.startDate;
       if (req.body.endDate !== undefined) event.endDate = req.body.endDate;
       if (req.body.registrationDeadline !== undefined) event.registrationDeadline = req.body.registrationDeadline;
+      if (req.body.venue !== undefined) event.venue = req.body.venue;
+      if (req.body.prizePool !== undefined) event.prizePool = req.body.prizePool;
       if (req.body.registrationLimit !== undefined) event.registrationLimit = req.body.registrationLimit;
       if (req.body.registrationFee !== undefined) event.registrationFee = req.body.registrationFee;
       if (req.body.tags !== undefined) event.tags = req.body.tags;
@@ -349,6 +353,8 @@ router.put('/:id', ...requireRole('organizer'), async (req, res) => {
       if (req.body.registrationLimit && Number(req.body.registrationLimit) > (event.registrationLimit || 0)) {
         event.registrationLimit = Number(req.body.registrationLimit);
       }
+      if (req.body.venue !== undefined) event.venue = req.body.venue;
+      if (req.body.prizePool !== undefined) event.prizePool = req.body.prizePool;
       if (req.body.status === 'ongoing' || req.body.status === 'closed') {
         event.status = req.body.status;
       }

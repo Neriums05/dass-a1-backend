@@ -16,10 +16,11 @@ const userSchema = new mongoose.Schema({
   lastName:        String,
   participantType: { type: String, enum: ['iiit', 'non-iiit'] },
   college:         String,
-  contactNumber:   String,
+  contactNumber:   { type: String, required: true },
   interests:       [String], // e.g. ['Music', 'Tech']
   // Array of organizer IDs this participant follows
   followedOrganizers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  hasCompletedOnboarding: { type: Boolean, default: false },
 
   // --- Organizer-only fields ---
   organizerName:  String,

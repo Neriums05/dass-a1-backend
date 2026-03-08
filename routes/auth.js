@@ -41,7 +41,7 @@ router.post('/register', async (req, res) => {
   try {
     const { email, password, firstName, lastName, participantType, college, contactNumber } = req.body;
 
-    if (!email || !password || !firstName || !lastName || !participantType) {
+    if (!email || !password || !firstName || !lastName || !participantType || !contactNumber) {
       return res.status(400).json({ message: 'All required fields must be provided' });
     }
 
@@ -139,6 +139,11 @@ router.put('/profile', auth, async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     if (user.role === 'participant') {
+      // Ensure contactNumber is provided
+      if (req.body.contactNumber !== undefined && (!req.body.contactNumber || !req.body.contactNumber.trim())) {
+        return res.status(400).json({ message: 'Contact Number is required' });
+      }
+
       // Only allow updating participant fields
       assignIfDefined(user, req.body, [
         'firstName',
@@ -146,7 +151,8 @@ router.put('/profile', auth, async (req, res) => {
         'contactNumber',
         'college',
         'interests',
-        'followedOrganizers'
+        'followedOrganizers',
+        'hasCompletedOnboarding'
       ]);
     }
     // Organizers update their profile via PUT /organizers/profile instead

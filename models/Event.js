@@ -8,6 +8,8 @@ const eventSchema = new mongoose.Schema({
   description: String,
   eventType:   { type: String, enum: ['normal', 'merchandise'], required: true },
   eligibility: String, // e.g. "Open to all", "IIIT only"
+  venue:       String,
+  prizePool:   String,
 
   registrationDeadline: Date,
   startDate:            Date,

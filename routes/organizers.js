@@ -11,10 +11,10 @@ const { requireRole } = require('../middleware/auth');
 // -------------------------------------------------------
 router.put('/profile', ...requireRole('organizer'), async (req, res) => {
   try {
-    const { organizerName, category, description, contactEmail, discordWebhook } = req.body;
+    const { organizerName, category, description, contactEmail, discordWebhook, contactNumber } = req.body;
     const user = await User.findByIdAndUpdate(
       req.user.id,
-      { organizerName, category, description, contactEmail, discordWebhook },
+      { organizerName, category, description, contactEmail, discordWebhook, contactNumber },
       { new: true }
     ).select('-password');
     res.json(user);
