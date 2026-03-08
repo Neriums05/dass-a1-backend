@@ -1,5 +1,3 @@
-// Route order matters: specific paths before /:id wildcards.
-
 const router = require('express').Router();
 const Event = require('../models/Event');
 const User = require('../models/User');
